@@ -5,7 +5,7 @@
 ## Interface-Titan: 38002
 ## Interface-Cata: 40402
 ## Interface-Mists: 50504, 50505
-## Title: Gargul |c00967FD2@project-version@|r
+## Title: Gargul (with bonus rolls) |c00967FD2@project-version@|r
 ## Title-deDE: Gargul |c00967FD2@project-version@|r
 ## Title-esES: Gargul |c00967FD2@project-version@|r
 ## Title-esMX: Gargul |c00967FD2@project-version@|r
