@@ -372,9 +372,20 @@ function Overview:refreshDetailsFrame()
         if (ItemLabel) then
             local labelString = Item.link;
 
+            -- Build suffix with bonus and/or multi-reserve count
+            local suffixParts = {};
+            local bonus = SoftRes:bonusRollForPlayerOnItem(itemID, self.selectedCharacter);
+            if (tonumber(bonus) and bonus > 0) then
+                tinsert(suffixParts, "+" .. bonus);
+            end
+
             -- The user reserved this item multiple times
             if (numberOfReservations > 1) then
-                labelString = (L["%s (%sx)"]):format(Item.link, numberOfReservations);
+                tinsert(suffixParts, tostring(numberOfReservations) .. "x");
+            end
+
+            if (#suffixParts > 0) then
+                labelString = ("%s (%s)"):format(Item.link, table.concat(suffixParts, ", "));
             end
 
             ItemLabel:SetText(labelString);
