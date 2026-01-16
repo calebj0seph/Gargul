@@ -146,6 +146,14 @@ function RollOff:announceStart(itemLink, time, note)
     self:stopListeningForRolls();
     self:listenForRolls();
 
+    local announceStartInRW = GL.User.isInRaid
+        and GL.User.hasAssist
+        and GL.Settings:get("MasterLooting.announceRollStart");
+
+    local announceEndInRW = GL.User.isInRaid
+        and GL.User.hasAssist
+        and GL.Settings:get("MasterLooting.announceRollEnd", true);
+
     --- If boosted rolls are enabled, sending additional data is required
     local b; -- Boosted-roll payload: identifier + range hash, range map only when it changed
 
@@ -198,6 +206,8 @@ function RollOff:announceStart(itemLink, time, note)
             g = self.gearSessionID,
             SupportedRolls = GL.Settings:get("RollTracking.Brackets", {}) or {},
             b = b,
+            announceStartInRW = announceStartInRW,
+            announceEndInRW = announceEndInRW,
         },
         channel = "GROUP",
     }):send();
@@ -371,10 +381,17 @@ end
 
 --- Anounce to everyone in the raid that a roll off has ended
 function RollOff:announceStop()
-    GL.CommMessage.new({
+    local announceEndInRW = GL.User.isInRaid
+        and GL.User.hasAssist
+        and GL.Settings:get("MasterLooting.announceRollEnd", true);
+
+    GL.CommMessage.new{
         action = CommActions.stopRollOff,
+        content = {
+            announceEndInRW = announceEndInRW,
+        },
         channel = "GROUP",
-    }):send();
+    }:send();
 end
 
 --- Start a roll off
@@ -470,6 +487,8 @@ function RollOff:start(CommMessage)
                     itemIcon = Details.icon,
                     SupportedRolls = SupportedRolls,
                     note = content.note,
+                    announceStartInRW = GL:toboolean(content.announceStartInRW),
+                    announceEndInRW = GL:toboolean(content.announceEndInRW),
                 };
 
                 self:resetInspectState();
@@ -484,6 +503,8 @@ function RollOff:start(CommMessage)
                 -- Same item re-roll: update timer and inspect state, keep rolls until reset/new item
                 self.CurrentRollOff.time = time;
                 self:resetInspectState();
+                self.CurrentRollOff.announceStartInRW = GL:toboolean(content.announceStartInRW);
+                self.CurrentRollOff.announceEndInRW = GL:toboolean(content.announceEndInRW);
             end
 
             -- Stored so that the roller UI can be redrawn later on (see /gl rolls)
@@ -555,8 +576,10 @@ function RollOff:start(CommMessage)
             local notifyOnItemOfInterest = GL.Settings:get("Rolling.notifyOnItemOfInterest");
             local itemOfInterestSound = GL.Settings:get("Rolling.itemOfInterestSound");
 
-            -- Play a raid warning sound
-            GL:playSound(SOUNDKIT.RAID_WARNING);
+            -- Play a raid warning sound (unless a /rw announcement is expected to play it already)
+            if (not GL:toboolean(self.CurrentRollOff.announceStartInRW)) then
+                GL:playSound(SOUNDKIT.RAID_WARNING, nil, true);
+            end
 
             -- If this is an item of interest, play a different sound and post a message
             local isItemOfInterest, reason = GL:isItemOfInterest(Details.id);
@@ -792,6 +815,10 @@ function RollOff:stop(CommMessage)
         return false;
     end
 
+    if (CommMessage and type(CommMessage.content) == "table") then
+        self.CurrentRollOff.announceEndInRW = GL:toboolean(CommMessage.content.announceEndInRW);
+    end
+
     -- If this user started the roll then we need to cancel some timers and post a message
     if (self:startedByMe()) then
         -- Announce that the roll has ended
@@ -817,8 +844,17 @@ function RollOff:stop(CommMessage)
         self.CountDownTimer = nil;
     end
 
-    -- Play raid warning sound
-    GL:playSound(SOUNDKIT.RAID_WARNING, "SFX");
+    local announceEndInRW = GL:toboolean(self.CurrentRollOff.announceEndInRW);
+    if (self:startedByMe()) then
+        announceEndInRW = GL.User.isInRaid
+            and GL.User.hasAssist
+            and GL.Settings:get("MasterLooting.announceRollEnd", true);
+    end
+
+    -- Play raid warning sound (unless a /rw announcement is expected to play it already)
+    if (not announceEndInRW) then
+        GL:playSound(SOUNDKIT.RAID_WARNING, "SFX", true);
+    end
 
     RollOff.inProgress = false;
     GL.Ace:CancelTimer(RollOff.StopRollOffTimer);
