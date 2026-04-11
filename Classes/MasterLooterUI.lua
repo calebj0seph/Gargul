@@ -899,10 +899,13 @@ function MasterLooterUI:drawPlayersTable(parent)
                 roller = strsub(roller, 1, openingBracketPosition - 1);
             end
 
-            local softResNote = "";
             local normalizedRoller = strlower(roller);
-            if (GL.SoftRes:itemIDIsReservedByPlayer(GL.RollOff.CurrentRollOff.itemID, normalizedRoller)) then
-                local Details = GL.SoftRes:getDetailsForPlayer(normalizedRoller);
+            local softResRollNote = false;
+            local softResNote = "";
+            local normalizedSoftResRoller = strlower(GL:disambiguateName(roller));
+            if (GL.SoftRes:itemIDIsReservedByPlayer(GL.RollOff.CurrentRollOff.itemID, normalizedSoftResRoller)) then
+                softResRollNote = GL.RollOff:softResRollNote(GL.RollOff.CurrentRollOff.itemID, normalizedSoftResRoller);
+                local Details = GL.SoftRes:getDetailsForPlayer(normalizedSoftResRoller);
                 local note = Details.note or "";
                 if (not GL:empty(note)) then
                     softResNote = strsub(note, 1, 20);
@@ -922,19 +925,24 @@ function MasterLooterUI:drawPlayersTable(parent)
             local showPlayerGroups = GL:count(GL.DB:get("TMB.RaidGroups", {})) > 1
                 and GL.Settings:get("TMB.showRaidGroup");
 
-            if (not wonItems and not showPlayerGroups and GL:empty(softResNote) and GL:empty(boostedRollsLine)) then
+            local showSoftResSection = softResRollNote or not GL:empty(softResNote);
+            if (not wonItems and not showPlayerGroups and not showSoftResSection and GL:empty(boostedRollsLine)) then
                 return;
             end
 
             GameTooltip:ClearLines();
             GameTooltip:SetOwner(rowFrame, "ANCHOR_RIGHT");
 
+            if (softResRollNote) then
+                GameTooltip:AddLine(("|c00F48CBA%s|r"):format(softResRollNote));
+            end
+
             if (not GL:empty(softResNote)) then
                 GameTooltip:AddLine(("|cFFDDDDDD%s|r"):format(softResNote));
+            end
 
-                if (showPlayerGroups or wonItems or not GL:empty(boostedRollsLine)) then
-                    GameTooltip:AddLine(" ");
-                end
+            if (showSoftResSection and (showPlayerGroups or wonItems or not GL:empty(boostedRollsLine))) then
+                GameTooltip:AddLine(" ");
             end
 
             if (not GL:empty(boostedRollsLine)) then

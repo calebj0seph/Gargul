@@ -117,9 +117,11 @@ function AutoRoll:getBracketForAction(SupportedRolls, action)
     end
 
     local wantOS = (action == "greed");
+    local RollTrackingBrackets = GL.RollOff and GL.RollOff.rollTrackingBrackets
+        and GL.RollOff:rollTrackingBrackets(SupportedRolls)
+        or SupportedRolls;
 
-    for _, Bracket in pairs(SupportedRolls) do
-        local identifier = Bracket[1];
+    for _, Bracket in pairs(RollTrackingBrackets) do
         local min = math.floor(tonumber(Bracket[2]) or 0);
         local max = math.floor(tonumber(Bracket[3]) or 0);
         local concernsOS = Bracket[5];
@@ -135,8 +137,8 @@ function AutoRoll:getBracketForAction(SupportedRolls, action)
     end
 
     -- Fallback: need = first bracket, greed = second
-    local first = SupportedRolls[1];
-    local second = SupportedRolls[2];
+    local first = RollTrackingBrackets[1];
+    local second = RollTrackingBrackets[2];
 
     if (action == "need" and first) then
         return math.floor(tonumber(first[2]) or 1), math.floor(tonumber(first[3]) or 100);
@@ -165,42 +167,55 @@ function AutoRoll:performAutoRoll(itemLink, itemID, SupportedRolls, rule)
         return false;
     end
 
+    if (rule == "need"
+        and GL.RollOff
+        and GL.RollOff.effectiveMSRollRangeForPlayer
+    ) then
+        local effectiveMSMin, effectiveMSMax = GL.RollOff:effectiveMSRollRangeForPlayer(
+            itemID,
+            GL.User.fqn,
+            SupportedRolls
+        );
+
+        if (effectiveMSMin and effectiveMSMax) then
+            min = effectiveMSMin;
+            max = effectiveMSMax;
+        end
+    end
+
     RandomRoll(min, max);
     return true;
 end
 
---- Check if SupportedRolls has exactly two brackets: first 1-100 (no OS), second 1-99 (OS).
---- Labels are ignored. Only RollTracking-style brackets (6 elements) count; BoostedRolls are excluded.
+--- Check if SupportedRolls describes a simple MS/OS setup with exactly two buttons.
 ---
 ---@param SupportedRolls table
 ---@return boolean
-function AutoRoll:areBracketsDefault(SupportedRolls)
+function AutoRoll:hasSimpleMSOSBrackets(SupportedRolls)
     if (not SupportedRolls or #SupportedRolls ~= 2) then
         return false;
     end
 
-    local rollTrackingBrackets = {};
-    for _, b in ipairs(SupportedRolls) do
-        if (type(b) == "table" and #b >= 6) then
-            tinsert(rollTrackingBrackets, b);
-        end
-    end
+    local rollTrackingBrackets = GL.RollOff and GL.RollOff.rollTrackingBrackets
+        and GL.RollOff:rollTrackingBrackets(SupportedRolls)
+        or {};
 
     if (#rollTrackingBrackets ~= 2) then
         return false;
     end
 
-    local first = rollTrackingBrackets[1];
-    local second = rollTrackingBrackets[2];
-    local firstMin = math.floor(tonumber(first[2]) or 0);
-    local firstMax = math.floor(tonumber(first[3]) or 0);
-    local firstOS = first[5];
-    local secondMin = math.floor(tonumber(second[2]) or 0);
-    local secondMax = math.floor(tonumber(second[3]) or 0);
-    local secondOS = second[5];
+    local osBrackets = 0;
+    local nonOSBrackets = 0;
 
-    return firstMin == 1 and firstMax == 100 and not firstOS
-        and secondMin == 1 and secondMax == 99 and secondOS;
+    for _, Bracket in ipairs(rollTrackingBrackets) do
+        if (GL:toboolean(Bracket[5])) then
+            osBrackets = osBrackets + 1;
+        else
+            nonOSBrackets = nonOSBrackets + 1;
+        end
+    end
+
+    return osBrackets == 1 and nonOSBrackets == 1;
 end
 
 --- Called when a roll starts. Returns handled, action. When handled is true, action is "rolled" or "passed".
@@ -215,7 +230,7 @@ function AutoRoll:onRollStart(itemLink, itemID, SupportedRolls)
         return false;
     end
 
-    if (not self:areBracketsDefault(SupportedRolls)) then
+    if (not self:hasSimpleMSOSBrackets(SupportedRolls)) then
         return false;
     end
 
