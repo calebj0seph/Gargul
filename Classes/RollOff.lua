@@ -574,6 +574,148 @@ function RollOff:startedByMe()
     return self.CurrentRollOff.initiator == GL.User.id;
 end
 
+--- Return the roll-tracking brackets for the active rolloff or the provided set.
+---
+---@param SupportedRolls? table
+---@return table
+function RollOff:rollTrackingBrackets(SupportedRolls)
+    SupportedRolls = SupportedRolls or GL:tableGet(self.CurrentRollOff, "SupportedRolls", {});
+
+    if (type(SupportedRolls) ~= "table") then
+        return {};
+    end
+
+    local RollTrackingBrackets = {};
+
+    for _, Bracket in ipairs(SupportedRolls) do
+        if (type(Bracket) == "table"
+            and #Bracket >= 6
+        ) then
+            local min = math.floor(tonumber(Bracket[2]) or 0);
+            local max = math.floor(tonumber(Bracket[3]) or 0);
+
+            if (min > 0
+                and max >= min
+            ) then
+                tinsert(RollTrackingBrackets, Bracket);
+            end
+        end
+    end
+
+    return RollTrackingBrackets;
+end
+
+--- Find the bracket that should behave like the MS bracket for SoftRes bonus rolls.
+--- Prefer an explicit MS label and otherwise fall back only when there is a
+--- single non-OS bracket to avoid boosting the wrong custom roll type.
+---
+---@param SupportedRolls? table
+---@return table|boolean
+function RollOff:bonusEligibleMSBracket(SupportedRolls)
+    local NonOSBrackets = {};
+    local localizedMS = type(L["MS"]) == "string" and L["MS"] or nil;
+
+    for _, Bracket in ipairs(self:rollTrackingBrackets(SupportedRolls)) do
+        if (not GL:toboolean(Bracket[5])) then
+            local identifier = tostring(Bracket[1] or "");
+
+            if (not GL:empty(identifier)
+                and (
+                    GL:iEquals(identifier, "MS")
+                    or (localizedMS and GL:iEquals(identifier, localizedMS))
+                )
+            ) then
+                return Bracket;
+            end
+
+            tinsert(NonOSBrackets, Bracket);
+        end
+    end
+
+    if (GL:empty(NonOSBrackets)) then
+        return false;
+    end
+
+    if (#NonOSBrackets == 1) then
+        return NonOSBrackets[1];
+    end
+
+    return false;
+end
+
+--- Return the effective MS roll range for the given player and item.
+---
+---@param itemID number|string
+---@param playerName string
+---@param SupportedRolls? table
+---@return number|nil min
+---@return number|nil max
+---@return table|nil RollBracket
+---@return number bonus
+function RollOff:effectiveMSRollRangeForPlayer(itemID, playerName, SupportedRolls)
+    local RollBracket = self:bonusEligibleMSBracket(SupportedRolls);
+    if (not RollBracket) then
+        return nil, nil, nil, 0;
+    end
+
+    local min = math.floor(tonumber(RollBracket[2]) or 0);
+    local max = math.floor(tonumber(RollBracket[3]) or 0);
+    if (min < 1 or max < min) then
+        return nil, nil, nil, 0;
+    end
+
+    local bonus = math.max(0, math.floor(tonumber(
+        GL.SoftRes:bonusRollForPlayerOnItem(itemID, playerName)
+    ) or 0));
+
+    return min, max + bonus, RollBracket, bonus;
+end
+
+--- Check whether the given range is a valid SoftRes bonus MS roll.
+---
+---@param itemID number|string
+---@param playerName string
+---@param low number
+---@param high number
+---@param SupportedRolls? table
+---@return boolean
+---@return table|boolean
+---@return number
+function RollOff:isValidSoftResBonusRollRangeForPlayer(itemID, playerName, low, high, SupportedRolls)
+    local min, max, RollBracket, bonus = self:effectiveMSRollRangeForPlayer(itemID, playerName, SupportedRolls);
+    if (not RollBracket or bonus < 1) then
+        return false, false, 0;
+    end
+
+    local baseMax = math.floor(tonumber(RollBracket[3]) or 0);
+    if (low == min and high == max and max > baseMax) then
+        return true, RollBracket, bonus;
+    end
+
+    return false, false, 0;
+end
+
+--- Match an incoming roll range against the current roll-tracking brackets.
+---
+---@param low number
+---@param high number
+---@param SupportedRolls? table
+---@return table|boolean
+function RollOff:rollTypeByRange(low, high, SupportedRolls)
+    for _, RollType in ipairs(self:rollTrackingBrackets(SupportedRolls)) do
+        local minimum = math.floor(tonumber(RollType[2]) or 0);
+        local maximum = math.floor(tonumber(RollType[3]) or 0);
+
+        if (low == minimum
+            and high == maximum
+        ) then
+            return RollType;
+        end
+    end
+
+    return false;
+end
+
 --- Stop a roll off. This method can be invoked internally when the roll
 --- off time is over or when announced by the initiation of the roll off.
 ---
@@ -921,18 +1063,38 @@ function RollOff:processRoll(message)
         roll = tonumber(roll) or 0;
         low = tonumber(low) or 0;
         high = tonumber(high) or 0;
+        local SupportedRolls = GL:tableGet(self.CurrentRollOff, "SupportedRolls", {});
 
-        local RollType = (function ()
-            for _, RollType in pairs(GL.Settings:get("RollTracking.Brackets", {})) do
-                if (low == RollType[2]
-                    and high == RollType[3]
-                ) then
-                    return RollType;
-                end
+        local RollType = self:rollTypeByRange(low, high, SupportedRolls);
+        local rollerName = GL:formatPlayerName(roller);
+        local GroupMember;
+
+        for _, Player in pairs(GL.User:groupMembers()) do
+            -- Rolls don't include a realm reference of any sort sadly
+            if (GL:iEquals(rollerName, Player.name)) then
+                GroupMember = Player;
+                break;
             end
+        end
 
-            return false;
-        end)();
+        --- Check for SoftRes bonus MS rolls
+        if (not RollType
+            and GroupMember
+        ) then
+            local isValidBonusRoll;
+            local bonusRollType;
+            isValidBonusRoll, bonusRollType = self:isValidSoftResBonusRollRangeForPlayer(
+                self.CurrentRollOff.itemID,
+                GroupMember.fqn,
+                low,
+                high,
+                SupportedRolls
+            );
+
+            if (isValidBonusRoll) then
+                RollType = bonusRollType;
+            end
+        end
 
         --- Check for boosted rolls
         if (not RollType
@@ -966,25 +1128,18 @@ function RollOff:processRoll(message)
             RollType[4] = 10;
         end
 
-        local rollerName = GL:formatPlayerName(roller);
-
         --- Make sure the person who rolled is in our group
-        for _, Player in pairs(GL.User:groupMembers()) do
-            -- Rolls don't include a realm reference of any sort sadly
-            if (GL:iEquals(rollerName, Player.name)) then
-                Roll = {
-                    player = GL:nameIsUnique(Player.name) and GL:formatPlayerName(Player.fqn) or roller, -- Make sure to not assume the wrong realm-specific name!
-                    class = Player.class,
-                    amount = roll,
-                    min = low,
-                    max = high,
-                    time = GetServerTime(),
-                    classification = RollType[1],
-                    priority = RollType[4],
-                };
-
-                break;
-            end
+        if (GroupMember) then
+            Roll = {
+                player = GL:nameIsUnique(GroupMember.name) and GL:formatPlayerName(GroupMember.fqn) or roller, -- Make sure to not assume the wrong realm-specific name!
+                class = GroupMember.class,
+                amount = roll,
+                min = low,
+                max = high,
+                time = GetServerTime(),
+                classification = RollType[1],
+                priority = RollType[4],
+            };
         end
     end
 
@@ -1683,6 +1838,39 @@ function RollOff:gearDisplayForRollEntry(Entry)
     };
 end
 
+--- Build the SoftRes note shown in the roll tracker and tooltips.
+---
+---@param itemID number|string
+---@param playerName string
+---@return string|boolean
+---@return string|boolean
+function RollOff:softResRollNote(itemID, playerName)
+    local normalizedPlayerName = strlower(GL:disambiguateName(playerName));
+    local numberOfReserves = GL.SoftRes:playerReservesOnItem(itemID, normalizedPlayerName) or 0;
+    if (numberOfReserves < 1) then
+        return false, false;
+    end
+
+    local noteParts = {};
+    if (numberOfReserves > 1) then
+        tinsert(noteParts, ("%sx"):format(numberOfReserves));
+    end
+
+    local bonus = math.max(0, math.floor(tonumber(
+        GL.SoftRes:bonusRollForPlayerOnItem(itemID, normalizedPlayerName)
+    ) or 0));
+    if (bonus > 0) then
+        tinsert(noteParts, "+" .. bonus);
+    end
+
+    local rollNote = L["SR"];
+    if (#noteParts > 0) then
+        rollNote = ("%s [%s]"):format(rollNote, table.concat(noteParts, ", "));
+    end
+
+    return rollNote, bonus > 0 and ("+" .. bonus) or false;
+end
+
 --- Build an enriched, priority-sorted array of roll entries.
 --- Used by both the MasterLooterUI table and the RollerUI roll tracker.
 ---
@@ -1709,19 +1897,15 @@ function RollOff:buildSortedRollData()
         local rollNotes = {};
         local normalizedPlayerName = strlower(GL:disambiguateName(playerName));
 
-        if (GL.SoftRes:itemIDIsReservedByPlayer(self.CurrentRollOff.itemID, normalizedPlayerName)) then
+        -- Check if the player reserved the current item id
+        if (GL.SoftRes:itemIDIsReservedByPlayer(self.CurrentRollOff.itemID, Roll.player or normalizedPlayerName)) then
             if (GL.Settings:get("RollTracking.sortBySoftRes")) then
                 rollPriority = 1;
             end
 
-            local numberOfReserves = GL.SoftRes:playerReservesOnItem(self.CurrentRollOff.itemID, normalizedPlayerName) or 0;
-
-            if (numberOfReserves > 0) then
-                if (numberOfReserves > 1) then
-                    tinsert(rollNotes, ("|c00F48CBA" .. L["SR [%sx]"] .. "|r"):format(numberOfReserves));
-                else
-                    tinsert(rollNotes, ("|c00F48CBA%s|r"):format(L["SR"]));
-                end
+            local softResRollNote = self:softResRollNote(self.CurrentRollOff.itemID, Roll.player or normalizedPlayerName);
+            if (softResRollNote) then
+                tinsert(rollNotes, ("|c00F48CBA%s|r"):format(softResRollNote));
             end
 
             local Details = GL.SoftRes:getDetailsForPlayer(normalizedPlayerName);

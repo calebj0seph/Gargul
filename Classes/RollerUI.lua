@@ -99,6 +99,11 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
 
     local RollButtons = {};
     local numberOfButtons = #SupportedRolls;
+    local effectiveMSMin, effectiveMSMax, bonusEligibleBracket = GL.RollOff:effectiveMSRollRangeForPlayer(
+        itemLink,
+        GL.User.fqn,
+        SupportedRolls
+    );
 
     local rollerUIWidth = 0;
     for i = 1, numberOfButtons do
@@ -167,14 +172,13 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
             local rollMin = min;
             local rollMax = max;
 
-            -- If this is the MS button, and a bonus roll exists for this item for the current player,
-            -- roll with 100+bonus (or keep higher max if already configured bigger)
-            local isMS = GL:iEquals(identifier, "MS") or (type(L["MS"]) == "string" and GL:iEquals(identifier, L["MS"]))
-            if (isMS) then
-                local bonus = GL.SoftRes:bonusRollForPlayerOnItem(itemLink, GL.User.fqn);
-                if (tonumber(bonus) and bonus > 0) then
-                    rollMax = math.max(rollMax, 100 + bonus);
-                end
+            if (bonusEligibleBracket
+                and RollDetails == bonusEligibleBracket
+                and effectiveMSMin
+                and effectiveMSMax
+            ) then
+                rollMin = effectiveMSMin;
+                rollMax = effectiveMSMax;
             end
 
             RandomRoll(rollMin, rollMax);
