@@ -7,6 +7,7 @@ local _, GL = ...;
 GL.RollerUI = GL.RollerUI or {
     Window = nil,
     RollTrackerFrame = nil,
+    rollOffEnded = false,
     rollTrackerExpanded = false,
     rollTrackerScrollOffset = 0,
 };
@@ -18,6 +19,8 @@ local ROLL_TRACKER_MAX_VISIBLE = 3;
 ---@param showRollAccepted? boolean Show "Roll accepted!" when draw completes (e.g. after auto-roll)
 ---@return boolean
 function RollerUI:show(time, itemLink, itemIcon, note, SupportedRolls, bth, boostedRollIdentifier, showRollAccepted)
+    self:closeIfRollOffEnded();
+
     if (self.Window and self.Window:IsShown()) then
         return false;
     end
@@ -73,9 +76,21 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
 
         HandleModifiedItemClick(itemLink, button);
     end);
+
+    Window:SetScript("OnEnter", function ()
+        GameTooltip:SetOwner(Window, "ANCHOR_TOP");
+        GameTooltip:SetText(L["Right click to close"]);
+        GameTooltip:Show();
+    end);
+    Window:SetScript("OnLeave", function ()
+        if (GameTooltip:IsOwned(Window)) then
+            GameTooltip:Hide();
+        end
+    end);
     Window:SetScale(GL.Settings:get("Rolling.scale", 1));
     Window.ownedByGargul = true; -- We used this in the tooltip check later
     self.Window = Window;
+    self.rollOffEnded = false;
 
     local Texture = Window:CreateTexture(nil,"BACKGROUND");
     Texture:SetColorTexture(0, 0, 0, .6);
@@ -175,6 +190,8 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
         tinsert(RollButtons, Button);
     end
 
+    self.RollButtons = RollButtons;
+
     -- Auto roll discovery hint: show only for simple MS/OS roll (2 buttons), not when BR or other buttons are present
     if (not GL.AutoRoll:hasAnyRulesInAnyProfile() and numberOfButtons == 2) then
         local AutoRollHint = Window:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall");
@@ -191,6 +208,7 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
     PassButton:SetScript("OnClick", function ()
         self:hide();
     end);
+    self.PassButton = PassButton;
 
     rollerUIWidth = math.max(rollerUIWidth + 54, 350);
     Window:SetWidth(rollerUIWidth);
@@ -259,6 +277,9 @@ function RollerUI:drawCountdownBar(time, itemLink, itemIcon, note, userCanUseIte
     end)
 
     TimerBar:SetDuration(time);
+
+    -- Without this the bar recycles itself the moment it runs out, leaving us with a stale reference
+    TimerBar:SetPauseWhenDone(true);
 
     -- Reset color to green or disabled
     if (userCanUseItem) then
@@ -495,7 +516,7 @@ function RollerUI:fillGearWidgets(Row, Entry)
             GL.Interface.GearPanel:toggle(
                 player,
                 GL.RollerUI.Window,
-                { point = "TOPRIGHT", relativePoint = "TOPLEFT", x = -5, y = 0, }
+                { point = "TOPLEFT", relativePoint = "TOPRIGHT", x = 6, y = 2, }
             );
         end);
     else
@@ -584,7 +605,7 @@ function RollerUI:drawRollTracker(width)
     ToggleButton:SetPushedTexture("Interface/ChatFrame/UI-ChatIM-SizeGrabber-Down");
     ToggleButton:SetScript("OnEnter", function ()
         GameTooltip:SetOwner(ToggleButton, "ANCHOR_TOP");
-        GameTooltip:SetText(self.rollTrackerExpanded and L["Hide rolls"] or L["Show rolls"]);
+        GameTooltip:SetText(self.rollTrackerExpanded and L["Hide rolls"] or L["Show rolls (keeps UI open)"]);
         GameTooltip:Show();
     end);
     ToggleButton:SetScript("OnLeave", function ()
@@ -887,7 +908,7 @@ function RollerUI:toggleRollTracker()
     -- Refresh tooltip if the mouse is still over the toggle button
     local ToggleButton = self.RollTrackerTopRow and self.RollTrackerTopRow.ToggleButton;
     if (ToggleButton and GameTooltip:IsOwned(ToggleButton)) then
-        GameTooltip:SetText(self.rollTrackerExpanded and L["Hide rolls"] or L["Show rolls"]);
+        GameTooltip:SetText(self.rollTrackerExpanded and L["Hide rolls"] or L["Show rolls (keeps UI open)"]);
     end
 end
 
@@ -956,6 +977,110 @@ function RollerUI:showRollAcceptedNotification(anchorFrame)
     end, 2);
 end
 
+--- Handle a roll off coming to an end
+---
+--- The window is kept around when the roll tracker is expanded so that the
+--- rolls remain visible. It closes on right-click, pass or when a new roll starts
+---
+---@return nil
+function RollerUI:rollOffStopped()
+    if (not self.Window
+        or not self.rollTrackerExpanded
+        or not self.RollTrackerFrame
+        or not self.RollTrackerFrame:IsShown()
+    ) then
+        self:hide();
+        return;
+    end
+
+    self:markRollOffEnded();
+end
+
+--- Strip the window of everything that only makes sense whilst a roll off is running
+---
+---@return nil
+function RollerUI:markRollOffEnded()
+    self.rollOffEnded = true;
+
+    -- Rolling is no longer possible, only the item and the rolls remain relevant
+    for _, Button in pairs(self.RollButtons or {}) do
+        Button:Hide();
+    end
+
+    -- There's nothing left to pass on, all the button does now is close the window
+    if (self.PassButton) then
+        self.PassButton:SetText(L["Close"]);
+
+        local FontString = self.PassButton:GetFontString();
+        local textWidth = FontString and FontString:GetStringWidth() or 0;
+        self.PassButton:SetWidth(math.max(math.ceil(textWidth) + 20, 50));
+    end
+
+    -- There's nothing left to count down, freeze the bar but keep the item visible
+    if (self.TimerBar and self.TimerBar.Pause) then
+        self.TimerBar:Pause();
+        self.TimerBar:SetTimeVisibility(false);
+        self.TimerBar.candyBarBar:SetMinMaxValues(-1, 0);
+        self.TimerBar.candyBarBar:SetValue(0);
+        self.TimerBar:SetColor(0, 0, 0, .3);
+    end
+end
+
+--- Bring the roller UI back for the current (or last) roll off, rolls included
+---
+---@return boolean
+function RollerUI:reopen()
+    if (self.Window and self.Window:IsShown()) then
+        return false;
+    end
+
+    local RollOff = GL.RollOff;
+    local Details = RollOff.CurrentRollOff or {};
+
+    if (GL:empty(Details.itemLink)) then
+        GL:warning(L["There are no rolls to show"]);
+        return false;
+    end
+
+    GL:canUserUseItem(Details.itemLink, function (userCanUseItem)
+        -- A roll off started whilst we were waiting on the item, it takes precedence
+        if (self.Window) then
+            return;
+        end
+
+        local secondsLeft = 0;
+        if (RollOff.inProgress and RollOff.StopRollOffTimer) then
+            secondsLeft = math.max(math.ceil(GL.Ace:TimeLeft(RollOff.StopRollOffTimer) or 0), 0);
+        end
+
+        self:draw(
+            secondsLeft,
+            Details.itemLink,
+            Details.itemIcon,
+            Details.note,
+            Details.SupportedRolls or {},
+            userCanUseItem,
+            Details.bth,
+            Details.boostedRollIdentifier
+        );
+
+        if (not RollOff.inProgress) then
+            self:markRollOffEnded();
+        end
+    end);
+
+    return true;
+end
+
+--- Close the window if the only reason it's still around is a roll off that ended
+---
+---@return nil
+function RollerUI:closeIfRollOffEnded()
+    if (self.rollOffEnded) then
+        self:hide();
+    end
+end
+
 ---@return nil
 function RollerUI:hide()
     GL.Events:unregister("RollerUIModifierStateChanged");
@@ -963,6 +1088,7 @@ function RollerUI:hide()
     GL.Events:unregister("RollerUIGearReceivedListener");
     GL:cancelTimer("RollerUIRollTrackerRefresh");
     GL.Interface.GearPanel:hide();
+    self.rollOffEnded = false;
 
     if (self.RollAcceptedTimer) then
         GL.Ace:CancelTimer(self.RollAcceptedTimer);
@@ -985,6 +1111,8 @@ function RollerUI:hide()
         self.TimerBar = nil;
     end
 
+    self.PassButton = nil;
+    self.RollButtons = nil;
     self.RollTrackerFrame = nil;
     self.RollTrackerTopRow = nil;
     self.RollTrackerExpandedFrame = nil;

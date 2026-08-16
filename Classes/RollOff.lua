@@ -23,6 +23,8 @@ GL.RollOff = GL.RollOff or {
         itemLink = nil, -- The item link of the item we're rolling for
         itemIcon = nil, -- The icon of the item we're rolling for
         note = nil, -- The note displayed on the progress bar
+        bth = nil, -- The identity (branding) of the player who started the roll off
+        boostedRollIdentifier = nil, -- The identifier of the boosted roll button (e.g. "BR")
         Rolls = {}, -- Player rolls
     },
     EquippedGearByPlayer = {},
@@ -409,6 +411,10 @@ function RollOff:start(CommMessage)
             self:resetInspectState();
         end
 
+        -- Stored so that the roller UI can be redrawn later on (see /gl rolls)
+        self.CurrentRollOff.bth = content.bth;
+        self.CurrentRollOff.boostedRollIdentifier = content.BoostedRollData and content.BoostedRollData.identifier or nil;
+
         self.inProgress = true;
         self.pendingStart = false;
         GL:cancelTimer("RollOff.startWatchdog");
@@ -419,6 +425,9 @@ function RollOff:start(CommMessage)
             GL.MasterLooterUI:drawReopenMasterLooterUIButton();
         end
 
+        -- A roller UI that's still up belongs to the previous roll off and is stale now
+        GL.RollerUI:closeIfRollOffEnded();
+
         -- Auto Roll: if we have a rule, perform the roll (or pass) and optionally skip the UI
         local autoRollHandled, autoRollAction = GL.AutoRoll:onRollStart(Details.link, Details.id, SupportedRolls);
 
@@ -426,8 +435,7 @@ function RollOff:start(CommMessage)
         if (GL.Settings:get("Rolling.showRollOffWindow"))
             and not (autoRollHandled and (autoRollAction == "passed" or GL.Settings:get("Rolling.closeAfterRoll")))
         then
-            local boostedRollIdentifier = content.BoostedRollData and content.BoostedRollData.identifier or nil;
-            GL.RollerUI:show(time, Details.link, Details.icon, content.note, SupportedRolls, content.bth, boostedRollIdentifier, autoRollHandled and autoRollAction == "rolled");
+            GL.RollerUI:show(time, Details.link, Details.icon, content.note, SupportedRolls, content.bth, self.CurrentRollOff.boostedRollIdentifier, autoRollHandled and autoRollAction == "rolled");
         elseif (autoRollHandled and autoRollAction == "rolled") then
             GL.RollerUI:showRollAcceptedNotification();
         end
@@ -588,7 +596,7 @@ function RollOff:stop(CommMessage)
     RollOff.inProgress = false;
     GL.Ace:CancelTimer(RollOff.StopRollOffTimer);
 
-    GL.RollerUI:hide();
+    GL.RollerUI:rollOffStopped();
 
     -- If we're the initiator then we need to update our initiator UI
     if (self:startedByMe()) then

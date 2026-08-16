@@ -40,6 +40,7 @@ GL.Commands = GL.Commands or {
         resetui = "Reset Gargul's UI sizes and positions. Useful in case something went out of bounds!",
         resetsettings = "Reset Gargul's settings. This can't be undone!",
         rolloff = "Open the RollOff UI where you can announce an item for players to roll on: /gl award [itemLink?]",
+        rolls = "Reopen the roll window of the current (or last) roll off, rolls included. Useful if you closed it by accident or want to check the rolls again",
         settings = "Open the settings menu",
         start = "Open the quick start guide for GDKP, SoftRes, auto looting and auto roll",
         softreserves = "Open either the SoftRes import window if there's no data available or open the SoftRes overview",
@@ -181,6 +182,9 @@ GL.Commands = GL.Commands or {
 
         -- Open the window for rolling off items
         rolloff = function (...) GL.MasterLooterUI:draw(...); end,
+
+        -- Bring back the roll window of the current (or last) roll off
+        rolls = function () GL.RollerUI:reopen(); end,
 
         -- Open the settings menu
         settings = function (...) Settings:draw(); end,
