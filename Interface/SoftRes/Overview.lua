@@ -212,6 +212,14 @@ function Overview:draw()
     end);
     ButtonFrame:AddChild(PostMissingSoftReserveInfoButton);
 
+    local ExportSessionButton = AceGUI:Create("Button");
+    ExportSessionButton:SetText(L["Export session"]);
+    ExportSessionButton:SetAutoWidth(true);
+    ExportSessionButton:SetCallback("OnClick", function ()
+        SoftRes:exportSession();
+    end);
+    ButtonFrame:AddChild(ExportSessionButton);
+
     local ClearDataButton = AceGUI:Create("Button");
     ClearDataButton:SetText(L["Clear"]);
     ClearDataButton:SetWidth(100); -- Minimum is 102

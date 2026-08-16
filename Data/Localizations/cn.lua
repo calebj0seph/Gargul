@@ -191,6 +191,7 @@ L["Disenchant"] = "分解";
 L["Edit"] = "编辑";
 L["Enable"] = "激活";
 L["Export"] = "导出";
+L["Export session"] = "导出会话";
 L["Are you sure you want to remove your complete reward history table? This deletes ALL loot data and cannot be undone!"] = "您确定要删除完整的分配历史记录表吗？这将删除所有战利品数据并且无法撤消！";
 L["Are you sure you want to remove all data for %s? This cannot be undone!"] = "您确定要删除 %s 的所有数据吗？这不能撤消！";
 L["\nThis is an export feature ONLY, there is no point editing any of the values: THEY WON'T BE SAVED!\n\n"] = [[

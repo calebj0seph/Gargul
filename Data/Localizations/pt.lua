@@ -195,6 +195,7 @@ L["Disenchant"] = "Desencantar";
 L["Edit"] = "Editar";
 L["Enable"] = "Habilitar";
 L["Export"] = "Exportar";
+L["Export session"] = "Exportar sessão";
 L["Are you sure you want to remove your complete reward history table? This deletes ALL loot data and cannot be undone!"] = "Tem certeza de que deseja remover toda a tabela do histórico de recompensas? Isso exclui TODOS os dados de saque e não pode ser desfeito!";
 L["Are you sure you want to remove all data for %s? This cannot be undone!"] = "Tem certeza de que deseja remover todos os dados de %s? Isto não pode ser desfeito!";
 L["\nThis is an export feature ONLY, there is no point editing any of the values: THEY WON'T BE SAVED!\n\n"] = [[

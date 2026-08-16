@@ -195,6 +195,7 @@ L["Disenchant"] = "마력 추출";
 L["Edit"] = "편집하다";
 L["Enable"] = "할 수 있게 하다";
 L["Export"] = "내보내다";
+L["Export session"] = "세션 내보내기";
 L["Are you sure you want to remove your complete reward history table? This deletes ALL loot data and cannot be undone!"] = "전체 보상 내역 테이블을 삭제하시겠습니까? 이렇게 하면 모든 전리품 데이터가 삭제되며 취소할 수 없습니다!";
 L["Are you sure you want to remove all data for %s? This cannot be undone!"] = "%s에 대한 모든 데이터를 제거하시겠습니까? 이 취소 할 수 없습니다!";
 L["\nThis is an export feature ONLY, there is no point editing any of the values: THEY WON'T BE SAVED!\n\n"] = [[

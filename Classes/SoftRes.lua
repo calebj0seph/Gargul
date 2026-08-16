@@ -909,8 +909,9 @@ function SoftRes:import(data, openOverview)
     end
 
     -- Attempt to "fix" player names (e.g. people misspelling their names)
+    local RewiredNames = {};
     if (Settings:get("SoftRes.fixPlayerNames", true)) then
-        local RewiredNames = self:fixPlayerNames();
+        RewiredNames = self:fixPlayerNames();
 
         if (reportStatus) then
             for softResName, playerName in pairs(RewiredNames) do
@@ -921,6 +922,8 @@ function SoftRes:import(data, openOverview)
             end
         end
     end
+
+    DB:set("SoftRes.MetaData.playerMap", RewiredNames);
 
     -- Reset the materialized data
     self.MaterializedData = {
@@ -1551,6 +1554,131 @@ function SoftRes:postMissingSoftReserves()
     );
 
     return true;
+end
+
+--- Build and show an export string of everything awarded during this soft-reserve session
+---
+---@return nil
+function SoftRes:exportSession()
+    if (not self:available()) then
+        GL:warning(L["Invalid data provided. Make sure to click the 'Gargul Export' button on softres.it and paste the full contents here"]);
+        return;
+    end
+
+    local softresID = DB:get("SoftRes.MetaData.id", "");
+    local importedAt = DB:get("SoftRes.MetaData.importedAt", 0);
+    local hasSoftResID = not GL:empty(softresID);
+
+    -- softres.it awards know their raid ID, anything imported elsewhere only has the import time to go by
+    local AwardRows = {};
+    for _, AwardEntry in pairs(DB:get("AwardHistory") or {}) do
+        local belongsToSession;
+        if (hasSoftResID) then
+            belongsToSession = AwardEntry.softresID == softresID;
+        else
+            belongsToSession = (AwardEntry.timestamp or 0) >= importedAt;
+        end
+
+        if (belongsToSession) then
+            table.insert(AwardRows, AwardEntry);
+        end
+    end
+
+    table.sort(AwardRows, function (a, b)
+        local timestampA = a.timestamp or 0;
+        local timestampB = b.timestamp or 0;
+
+        if (timestampA ~= timestampB) then
+            return timestampA < timestampB;
+        end
+
+        return (a.itemID or 0) < (b.itemID or 0);
+    end);
+
+    -- SerializeJSON turns empty tables into {}, so we tag them and swap in the right literal later
+    local placeholderID = GL:uuid():gsub("%-", "");
+    local emptyArray = ("@@GARGUL_EMPTY_ARRAY_%s@@"):format(placeholderID);
+    local emptyObject = ("@@GARGUL_EMPTY_OBJECT_%s@@"):format(placeholderID);
+
+    local Data = {};
+    local CanonicalRows = {};
+    for _, AwardEntry in ipairs(AwardRows) do
+        local isBonusLoot = AwardEntry.isBonusLoot == true;
+        local received = AwardEntry.received == true;
+        local Rolls = {};
+        local canonicalRolls = "";
+
+        for _, Roll in ipairs(AwardEntry.Rolls or {}) do
+            table.insert(Rolls, {
+                amount = Roll.amount,
+                player = Roll.player,
+                timestamp = Roll.time,
+            });
+
+            canonicalRolls = ("%s\t%s\t%s\t%s"):format(
+                canonicalRolls,
+                tostring(Roll.amount),
+                tostring(Roll.player),
+                tostring(Roll.time)
+            );
+        end
+
+        table.insert(Data, {
+            itemID = AwardEntry.itemID,
+            awardedBy = AwardEntry.awardedBy,
+            awardedTo = AwardEntry.awardedTo,
+            isBonusLoot = isBonusLoot,
+            received = received,
+            timestamp = AwardEntry.timestamp,
+            rolls = not GL:empty(Rolls) and Rolls or emptyArray,
+        });
+        table.insert(CanonicalRows, ("%s\t%s\t%s\t%s\t%s\t%s%s"):format(
+            tostring(AwardEntry.itemID),
+            tostring(AwardEntry.awardedBy),
+            tostring(AwardEntry.awardedTo),
+            tostring(AwardEntry.timestamp),
+            isBonusLoot and "1" or "0",
+            received and "1" or "0",
+            canonicalRolls
+        ));
+    end
+
+    -- Checksum our own rows instead of the JSON, we don't control its key order or number formatting
+    local LibDeflate = LibStub:GetLibrary("LibDeflate");
+    local checksum = ("%08x"):format(LibDeflate:Adler32(table.concat(CanonicalRows, "\n")));
+    local PlayerMap = DB:get("SoftRes.MetaData.playerMap", {});
+
+    local serializeSucceeded, json = pcall(function ()
+        return C_EncodingUtil.SerializeJSON({
+            data = not GL:empty(Data) and Data or emptyArray,
+            checksum = checksum,
+            playerMap = not GL:empty(PlayerMap) and PlayerMap or emptyObject,
+        });
+    end);
+
+    if (not serializeSucceeded or GL:empty(json)) then
+        GL:error(L["Something went wrong!"]);
+        return;
+    end
+
+    json = json:gsub(('"%s"'):format(emptyArray), "[]"):gsub(('"%s"'):format(emptyObject), "{}");
+
+    local compressed = C_EncodingUtil.CompressString(json, Enum.CompressionMethod.Zlib);
+    if (not compressed) then
+        GL:error(L["Unable to zlib compress the data. Contact support via https://discord.gg/D3mDhYPVzf"]);
+        return;
+    end
+
+    local encoded = C_EncodingUtil.EncodeBase64(compressed, Enum.Base64Variant.Standard);
+    if (not encoded) then
+        GL:error(L["Something went wrong!"]);
+        return;
+    end
+
+    GL.Interface.Dialogs.HyperlinkDialog:open({
+        description = L["Copy this export as-is and upload it in..."],
+        hyperlink = encoded,
+    });
 end
 
 --- Check whether the current user is allowed to broadcast SoftRes data
