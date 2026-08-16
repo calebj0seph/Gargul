@@ -19,7 +19,7 @@ local GearOverview = {
 GL.Interface.GearOverview = GearOverview;
 
 --[[ CONSTANTS ]]
-local WINDOW_WIDTH = 450;
+local WINDOW_WIDTH = 600;
 local WINDOW_HEIGHT = 420;
 local ROW_HEIGHT = 22;
 local ICON_SIZE = 16;
@@ -95,7 +95,7 @@ function GearOverview:build()
         width = WINDOW_WIDTH,
         height = WINDOW_HEIGHT,
         minWidth = WINDOW_WIDTH,
-        maxWidth = WINDOW_WIDTH,
+        maxWidth = 1000,
         minHeight = 220,
         maxHeight = 800,
         hideMinimizeButton = true,
