@@ -249,6 +249,28 @@ function Overview:build()
         self.EditButton = EditButton;
     end
 
+    do --[[ SOFTRES BUTTON ]]
+        ---@type Frame
+        local SoftResButton = CreateFrame("Button", nil, ItemHolder, "UIPanelButtonTemplate");
+        SoftResButton:SetSize(18, 18);
+
+        ---@type Texture
+        local NormalTexture = SoftResButton.normalTexture or SoftResButton:CreateTexture();
+        NormalTexture:SetTexture("Interface/AddOns/Gargul/Assets/Buttons/share");
+        NormalTexture:SetAllPoints(SoftResButton);
+        SoftResButton:SetNormalTexture(NormalTexture);
+
+        ---@type Texture
+        local HighlightTexture = SoftResButton:CreateTexture();
+        HighlightTexture:SetTexture("Interface/AddOns/Gargul/Assets/Buttons/share-highlighted");
+        HighlightTexture:SetAllPoints(SoftResButton);
+        SoftResButton:SetHighlightTexture(HighlightTexture);
+
+        Interface:addTooltip(SoftResButton, L["SoftRes raid"]);
+
+        self.SoftResButton = SoftResButton;
+    end
+
     --[[ FOOTER BUTTONS ]]
     do
         local Export = Interface:dynamicPanelButton(Window, L["Export"]);
@@ -463,6 +485,7 @@ function Overview:refreshItems()
                 BRCost = AwardEntry.BRCost,
                 itemID = AwardEntry.itemID,
                 itemLink = AwardEntry.itemLink,
+                softresID = AwardEntry.softresID,
                 winnerClass = AwardEntry.winnerClass,
                 winningRollType = AwardEntry.winningRollType,
                 OS = AwardEntry.OS and 1 or 0,
@@ -506,6 +529,7 @@ function Overview:refreshItems()
         local DeleteButton = self.DeleteButton;
         local EditButton = self.EditButton;
         local DisenchantButton = self.DisenchantButton;
+        local SoftResButton = self.SoftResButton;
         local classFilesByID = GL:tableFlip(Constants.UnitClasses);
         for _, Entry in pairs (Entries or {}) do
             (function ()
@@ -689,16 +713,27 @@ function Overview:refreshItems()
                     GameTooltip:Hide();
                 end);
 
-                --[[ DELETE / EDIT / DISENCHANT BUTTON BEHAVIOR ]]
+                --[[ DELETE / EDIT / DISENCHANT / SOFTRES BUTTON BEHAVIOR ]]
                 ItemRow:HookScript("OnEnter", function ()
                     DeleteButton:SetFrameLevel(ItemRow:GetFrameLevel() + 1);
                     DeleteButton:ClearAllPoints();
                     DeleteButton:SetPoint("TOPRIGHT", ItemRow, "TOPRIGHT", -2, 0);
                     DeleteButton:Show();
 
+                    -- Items awarded outside of a softres.it session have no raid to link to
+                    local softResRaidIsKnown = not GL:empty(Entry.softresID);
+                    if (softResRaidIsKnown) then
+                        SoftResButton:SetFrameLevel(ItemRow:GetFrameLevel() + 1);
+                        SoftResButton:ClearAllPoints();
+                        SoftResButton:SetPoint("TOPRIGHT", DeleteButton, "TOPLEFT", -2, 0);
+                        SoftResButton:Show();
+                    else
+                        SoftResButton:Hide();
+                    end
+
                     DisenchantButton:SetFrameLevel(ItemRow:GetFrameLevel() + 1);
                     DisenchantButton:ClearAllPoints();
-                    DisenchantButton:SetPoint("TOPRIGHT", DeleteButton, "TOPLEFT", -2, 0);
+                    DisenchantButton:SetPoint("TOPRIGHT", softResRaidIsKnown and SoftResButton or DeleteButton, "TOPLEFT", -2, 0);
                     DisenchantButton:Show();
 
                     EditButton:SetFrameLevel(ItemRow:GetFrameLevel() + 1);
@@ -807,16 +842,31 @@ function Overview:refreshItems()
                             GL.AwardedLoot:deleteWinner(Entry.checksum);
                         end);
                     end);
+
+                    if (softResRaidIsKnown) then
+                        SoftResButton:SetScript("OnClick", function (_, button)
+                            if (button ~= "LeftButton") then
+                                return;
+                            end
+
+                            GL.Interface.Dialogs.HyperlinkDialog:open({
+                                description = L["This item was awarded during the following SoftRes raid"],
+                                hyperlink = ("https://softres.it/raid/%s"):format(Entry.softresID),
+                            });
+                        end);
+                    end
                 end);
 
                 ItemRow:HookScript("OnLeave", function ()
                     if (not Interface:mouseIsOnFrame(DeleteButton)
                         and not Interface:mouseIsOnFrame(EditButton)
                         and not Interface:mouseIsOnFrame(DisenchantButton)
+                        and not Interface:mouseIsOnFrame(SoftResButton)
                     ) then
                         DeleteButton:Hide();
                         EditButton:Hide();
                         DisenchantButton:Hide();
+                        SoftResButton:Hide();
                     end
                 end);
 
