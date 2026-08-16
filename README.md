@@ -10,7 +10,7 @@
   <img width="300" height="300" alt="image" src="https://github.com/user-attachments/assets/356aafed-be20-4c9d-b5e7-896394faff79" />
 </p>
 
-The all-in-one loot addon for World of Warcraft. GDKP, SoftRes, auto looting, auto rolling, TMB, DFT, and more. Works on Retail, Classic Era, and every flavor in between.
+The all-in-one loot addon for World of Warcraft. GDKP, Softres, auto looting, auto rolling, TMB, DFT, and more. Works on Retail, Classic Era, and every flavor in between.
 
 Only the loot master needs Gargul for most features. Raiders benefit from installing it too, but it's not required.
 
@@ -20,14 +20,14 @@ Only the loot master needs Gargul for most features. Raiders benefit from instal
 /gl start
 ```
 
-Run this in-game and Gargul walks you through everything: hotkeys, GDKP, SoftRes, auto looting, and auto rolling. No raid required, you can test every feature by yourself.
+Run this in-game and Gargul walks you through everything: hotkeys, GDKP, Softres, auto looting, and auto rolling. No raid required, you can test every feature by yourself.
 
 ## What Can It Do?
 
 | Feature | What it does | Command |
 |---|---|---|
 | **GDKP** | Auction loot and split the gold. Multi-auction lets you sell many items at once. | `/gdkp` or `/gl ma` |
-| **SoftRes** | Import soft reserves from softres.it. Reserves show on tooltips and when rolling. | `/gl sr` |
+| **Softres** | Import soft reserves from softres.it. Reserves show on tooltips and when rolling. | `/gl sr` |
 | **Auto Looting** | Automatically send loot to the right player. Greens to DE, epics to ML, you name it. | `/gl pm` |
 | **Auto Rolling** | Search for items and assign need, greed, or pass. Gargul rolls for you automatically. | `/gl autoroll` |
 | **TMB / DFT** | Import wishlists and prio lists. Tooltip and roll integration. | `/gl tmb` or `/gl dft` |
@@ -56,7 +56,7 @@ Change hotkeys in `/gl` -> Shortcut Keys.
 | `/gl help` | List all commands |
 | `/gdkp` | GDKP session manager |
 | `/gl ma` | Multi-auction (batch auction) |
-| `/gl sr` | SoftRes import |
+| `/gl sr` | Softres import |
 | `/gl pm` | Auto loot rules (PackMule) |
 | `/gl autoroll` | Auto roll rules |
 

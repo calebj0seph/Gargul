@@ -21,7 +21,7 @@ function RollTracking:draw(Parent, Window)
             setting = "RollTracking.trackAll",
         },
         {
-            label = "Sort rolls by SoftRes status",
+            label = "Sort rolls by Softres status",
             setting = "RollTracking.sortBySoftRes",
         },
         {

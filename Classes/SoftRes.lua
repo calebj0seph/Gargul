@@ -1235,7 +1235,7 @@ end
 ---@return boolean
 function SoftRes:importCSVData(data, reportStatus)
     if (reportStatus) then
-        GL:warning(L["SoftRes Weakaura and CSV data are deprecated, use the Gargul export instead!"]);
+        GL:warning(L["Softres Weakaura and CSV data are deprecated, use the Gargul export instead!"]);
     end
 
     local PlusOnes = {};
@@ -1467,11 +1467,11 @@ function SoftRes:receiveSoftRes(CommMessage)
 
     local importString = CommMessage.content;
     if (not GL:empty(importString)) then
-        GL:warning((L["Attempting to process incoming SoftRes data from %s"]):format(CommMessage.Sender.name));
+        GL:warning((L["Attempting to process incoming Softres data from %s"]):format(CommMessage.Sender.name));
         return self:import(importString);
     end
 
-    GL:warning((L["Couldn't process SoftRes data received from %s"]):format(CommMessage.Sender.name));
+    GL:warning((L["Couldn't process Softres data received from %s"]):format(CommMessage.Sender.name));
     return false;
 end
 

@@ -146,9 +146,9 @@ function MasterLooterDialog:draw()
     DescriptionFrame:AddChild(Description);
 
     -- SoftRes
-    local SoftResButtonText = L["Clear SoftRes"];
+    local SoftResButtonText = L["Clear Softres"];
     if (not GL.SoftRes:available()) then
-        SoftResButtonText = L["Import SoftRes"];
+        SoftResButtonText = L["Import Softres"];
     end
 
     local SoftResButton = AceGUI:Create("Button");
@@ -158,7 +158,7 @@ function MasterLooterDialog:draw()
     SoftResButton:SetCallback("OnClick", function ()
         if (GL.SoftRes:available()) then
             GL.SoftRes:clear();
-            SoftResButton:SetText(L["Import SoftRes"]);
+            SoftResButton:SetText(L["Import Softres"]);
             return;
         end
 
@@ -167,7 +167,7 @@ function MasterLooterDialog:draw()
     Window:AddChild(SoftResButton);
 
     GL.Events:register("MasterLooterSoftResImportedListener", "GL.SOFTRES_IMPORTED", function ()
-        SoftResButton:SetText(L["Clear SoftRes"]);
+        SoftResButton:SetText(L["Clear Softres"]);
     end);
 
     local VerticalSpacer = AceGUI:Create("SimpleGroup");

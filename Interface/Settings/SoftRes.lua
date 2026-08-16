@@ -17,7 +17,7 @@ function SoftRes:draw(Parent)
     local Checkboxes = {
         {
             label = "Enable",
-            description = "Show SoftRes data on tooltips",
+            description = "Show Softres data on tooltips",
             setting = "SoftRes.enableTooltips",
         },
         {
@@ -27,12 +27,12 @@ function SoftRes:draw(Parent)
         },
         {
             label = "Announce details of dropped loot",
-            description = "SoftRes details of dropped loot are also announced in chat",
+            description = "Softres details of dropped loot are also announced in chat",
             setting = "SoftRes.announceInfoInChat",
         },
         {
             label = "Announce details when rolling out loot",
-            description = "SoftRes details will also be included whenever you roll out an item",
+            description = "Softres details will also be included whenever you roll out an item",
             setting = "SoftRes.announceInfoWhenRolling",
         },
         {
@@ -59,7 +59,7 @@ function SoftRes:draw(Parent)
     Parent:AddChild(HorizontalSpacer);
 
     local OpenSoftRes = GL.AceGUI:Create("Button");
-    OpenSoftRes:SetText("SoftRes");
+    OpenSoftRes:SetText("Softres");
     OpenSoftRes:SetCallback("OnClick", function ()
         GL.Settings:close();
         GL.Commands:call("softreserves");

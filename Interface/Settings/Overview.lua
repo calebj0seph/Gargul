@@ -20,7 +20,7 @@ GL.Interface.Settings.Overview = {
         { "|c00A79EFFWELCOME|r", "Welcome", },
         { "General", "General", },
         { "Minimap Icon", "MinimapButton", },
-        { "SoftRes", "SoftRes", },
+        { "Softres", "SoftRes", },
         { "TMB and DFT", "TMB", },
         GL.GDKPIsAllowed and { "GDKP", "GDKP", } or nil,
         GL.GDKPIsAllowed and { "    Communication", "GDKPCommunication", } or nil,

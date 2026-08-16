@@ -266,7 +266,7 @@ function Overview:build()
         HighlightTexture:SetAllPoints(SoftResButton);
         SoftResButton:SetHighlightTexture(HighlightTexture);
 
-        Interface:addTooltip(SoftResButton, L["SoftRes raid"]);
+        Interface:addTooltip(SoftResButton, L["Softres raid"]);
 
         self.SoftResButton = SoftResButton;
     end
@@ -850,7 +850,7 @@ function Overview:refreshItems()
                             end
 
                             GL.Interface.Dialogs.HyperlinkDialog:open({
-                                description = L["This item was awarded during the following SoftRes raid"],
+                                description = L["This item was awarded during the following Softres raid"],
                                 hyperlink = ("https://softres.it/raid/%s"):format(Entry.softresID),
                             });
                         end);

@@ -26,12 +26,12 @@ function LootHighlighting:draw(Parent)
             setting = "highlightMyItemsOnly",
         },
         {
-            label = "SoftRes: Highlight soft-reserved items",
+            label = "Softres: Highlight soft-reserved items",
             description = "Soft-reserved are highlighted\n(yellow glow)",
             setting = "highlightSoftReservedItems",
         },
         {
-            label = "SoftRes: Highlight hard-reserved items",
+            label = "Softres: Highlight hard-reserved items",
             description = "Hard-reserved are highlighted\n(red glow)",
             setting = "highlightHardReservedItems",
         },

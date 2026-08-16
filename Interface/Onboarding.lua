@@ -554,7 +554,7 @@ function Onboarding:build()
             L["Reserved items are highlighted when they drop"],
             L["Reservation details are displayed when you hover over an item"],
         },
-        buttonText = L["Open SoftRes"],
+        buttonText = L["Open Softres"],
         action = function ()
             Onboarding:close();
             GL.Commands:call("softreserves");

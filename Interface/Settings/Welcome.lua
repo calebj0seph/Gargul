@@ -10,7 +10,7 @@ local AceGUI = GL.AceGUI;
 
 ---@class WelcomeSettings
 GL.Interface.Settings.Welcome = {
-    description = "\n|c00FFF569Welcome to Gargul!|r\n\nNew? Click |c00A79EFFStart here|r below for a quick tour of GDKP, SoftRes, auto looting and more.\n\nEverything can be tested without being in a raid!",
+    description = "\n|c00FFF569Welcome to Gargul!|r\n\nNew? Click |c00A79EFFStart here|r below for a quick tour of GDKP, Softres, auto looting and more.\n\nEverything can be tested without being in a raid!",
 };
 local Welcome = GL.Interface.Settings.Welcome; ---@type WelcomeSettings
 
