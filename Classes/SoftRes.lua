@@ -1609,17 +1609,25 @@ function SoftRes:exportSession()
         local canonicalRolls = "";
 
         for _, Roll in ipairs(AwardEntry.Rolls or {}) do
+            -- Rolls awarded before we started recording the range report 0 for both bounds
+            local min = Roll.min or 0;
+            local max = Roll.max or 0;
+
             table.insert(Rolls, {
                 amount = Roll.amount,
                 player = Roll.player,
                 timestamp = Roll.time,
+                min = min,
+                max = max,
             });
 
-            canonicalRolls = ("%s\t%s\t%s\t%s"):format(
+            canonicalRolls = ("%s\t%s\t%s\t%s\t%s\t%s"):format(
                 canonicalRolls,
                 tostring(Roll.amount),
                 tostring(Roll.player),
-                tostring(Roll.time)
+                tostring(Roll.time),
+                tostring(min),
+                tostring(max)
             );
         end
 
@@ -1650,6 +1658,7 @@ function SoftRes:exportSession()
 
     local serializeSucceeded, json = pcall(function ()
         return C_EncodingUtil.SerializeJSON({
+            ID = softresID,
             data = not GL:empty(Data) and Data or emptyArray,
             checksum = checksum,
             playerMap = not GL:empty(PlayerMap) and PlayerMap or emptyObject,
@@ -1676,7 +1685,7 @@ function SoftRes:exportSession()
     end
 
     GL.Interface.Dialogs.HyperlinkDialog:open({
-        description = L["Copy this export as-is and upload it in..."],
+        description = L["Copy this export as-is and upload it in Softres by clicking the |c00A79EFFImport Result|r button!"],
         hyperlink = encoded,
     });
 end

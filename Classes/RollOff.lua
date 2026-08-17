@@ -903,6 +903,8 @@ function RollOff:processRoll(message)
                     player = GL:nameIsUnique(Player.name) and GL:formatPlayerName(Player.fqn) or roller, -- Make sure to not assume the wrong realm-specific name!
                     class = Player.class,
                     amount = roll,
+                    min = low,
+                    max = high,
                     time = GetServerTime(),
                     classification = RollType[1],
                     priority = RollType[4],
