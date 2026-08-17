@@ -1,8 +1,8 @@
-## Interface: 120007, 120100
+## Interface: 120100, 120101
 ## Interface-Classic: 11509
 ## Interface-BCC: 20506
 ## Interface-Wrath: 30405
-## Interface-Titan: 38001
+## Interface-Titan: 38002
 ## Interface-Cata: 40402
 ## Interface-Mists: 50504, 50505
 ## Title: Gargul |c00967FD2@project-version@|r
@@ -41,7 +41,7 @@
 ## IconTexture: Interface\AddOns\Gargul\Assets\Buttons\minimap
 ## OptionalDeps: LibStub, CallbackHandler-1.0, LibSharedMedia-3.0, LibDeflate, LibSerialize, Masque, LibCustomGlow, ChatThrottleLib
 ## Author: Zhorax - Firemaw
-## Version: 7.8.0
+## Version: 7.8.1
 ## DefaultState: enabled
 ## SavedVariables: GargulDB
 ## X-Donate: https://www.patreon.com/gargul
