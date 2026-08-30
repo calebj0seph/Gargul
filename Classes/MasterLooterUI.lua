@@ -909,12 +909,20 @@ function MasterLooterUI:drawPlayersTable(parent)
                 end
             end
 
+            local boostedRollsLine = "";
+            if (GL.BoostedRolls:enabled()) then
+                boostedRollsLine = (L["%s points: %d"]):format(
+                    GL.Settings:get("BoostedRolls.identifier", "BR"),
+                    GL.BoostedRolls:getPoints(normalizedRoller)
+                );
+            end
+
             local ItemsWonByRollerInTheLast8Hours = GL.AwardedLoot:byWinner(GL:addRealm(roller), GetServerTime() - (8 * 60 * 60)) or {};
             local wonItems = not GL:empty(ItemsWonByRollerInTheLast8Hours);
             local showPlayerGroups = GL:count(GL.DB:get("TMB.RaidGroups", {})) > 1
                 and GL.Settings:get("TMB.showRaidGroup");
 
-            if (not wonItems and not showPlayerGroups and GL:empty(softResNote)) then
+            if (not wonItems and not showPlayerGroups and GL:empty(softResNote) and GL:empty(boostedRollsLine)) then
                 return;
             end
 
@@ -923,6 +931,14 @@ function MasterLooterUI:drawPlayersTable(parent)
 
             if (not GL:empty(softResNote)) then
                 GameTooltip:AddLine(("|cFFDDDDDD%s|r"):format(softResNote));
+
+                if (showPlayerGroups or wonItems or not GL:empty(boostedRollsLine)) then
+                    GameTooltip:AddLine(" ");
+                end
+            end
+
+            if (not GL:empty(boostedRollsLine)) then
+                GameTooltip:AddLine(boostedRollsLine);
 
                 if (showPlayerGroups or wonItems) then
                     GameTooltip:AddLine(" ");
