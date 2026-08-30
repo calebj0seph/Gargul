@@ -308,13 +308,22 @@ function Overview:draw()
                     return;
                 end
 
-                GL:forEachGroupMember(function (Member)
-                    local BRGUID = BoostedRolls:playerGUID(Member.name, Member.realm);
+                -- Not in a group, only add points to ourselves (mirrors 'Add missing raiders')
+                if (not GL.User.isInGroup) then
+                    local BRGUID = BoostedRolls:myGUID();
 
                     if (BoostedRolls:hasPoints(BRGUID)) then
                         BoostedRolls:addPoints(BRGUID, value);
                     end
-                end);
+                else
+                    GL:forEachGroupMember(function (Member)
+                        local BRGUID = BoostedRolls:playerGUID(Member.name, Member.realm);
+
+                        if (BoostedRolls:hasPoints(BRGUID)) then
+                            BoostedRolls:addPoints(BRGUID, value);
+                        end
+                    end);
+                end
 
                 self:refreshTable();
             end,
@@ -523,7 +532,7 @@ function Overview:setPoints(points, updateEditBox)
         return;
     end
 
-    points = BoostedRolls:setPoints(self.selectedCharacter, points, not GL.User.isIngroup);
+    points = BoostedRolls:setPoints(self.selectedCharacter, points, not GL.User.isInGroup);
 
     if (updateEditBox) then
         GL.Interface:get(self, "EditBox.CurrentPoints"):SetText(points);
