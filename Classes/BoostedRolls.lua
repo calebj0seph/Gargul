@@ -3,22 +3,23 @@ local L = Gargul_L;
 ---@type GL
 local _, GL = ...;
 
+local DB = GL.DB; ---@type DB
+local CommActions = GL.Data.Constants.Comm.Actions;
+
 ---@class BoostedRolls
-GL.BoostedRolls = {
+local BoostedRolls = {
     _initialized = false,
     broadcastInProgress = false,
     requestingData = false,
-    ImportDialog = false,
     MaterializedData = {
         DetailsByPlayerName = {},
     },
     QueuedUpdates = {},
     QueuedUpdateBroadcastTimer = false,
 };
+GL.BoostedRolls = BoostedRolls; ---@type BoostedRolls
 
-local DB = GL.DB; ---@type DB
-local CommActions = GL.Data.Constants.Comm.Actions;
-local BoostedRolls = GL.BoostedRolls; ---@type BoostedRolls
+--[[ INITIALIZATION ]]
 
 ---@return boolean
 function BoostedRolls:_init()
@@ -51,7 +52,10 @@ function BoostedRolls:_init()
     return true;
 end
 
+--[[ IDENTITY ]]
+
 ---@param player string
+---@param realm? string
 ---@return string
 function BoostedRolls:playerGUID(player, realm)
     return strlower(GL:addRealm(player, realm));
@@ -70,12 +74,14 @@ function BoostedRolls:normalizedName(playerName)
     local normalizedName = strlower(GL:addRealm(playerName));
 
     --- Follow alias table if present
-    return GL.DB:get("BoostedRolls.Aliases." .. normalizedName, normalizedName);
+    return DB:get("BoostedRolls.Aliases." .. normalizedName, normalizedName);
 end
+
+--[[ TRUST ]]
 
 --- Check whether we trust the given player (currently used to auto-accept incoming broadcasts)
 ---
----@param playerName string
+---@param playerName? string
 ---@return boolean
 function BoostedRolls:playerIsTrusted(playerName)
     if (not playerName) then
@@ -109,7 +115,7 @@ function BoostedRolls:markPlayerAsTrusted(playerName)
     local trustedPlayerCSV = GL.Settings:get("BoostedRolls.automaticallyAcceptDataFrom", "");
     local TrustedPlayers = GL:explode(trustedPlayerCSV, ",");
 
-    tinsert(TrustedPlayers, playerName);
+    table.insert(TrustedPlayers, playerName);
     GL.Settings:set("BoostedRolls.automaticallyAcceptDataFrom", table.concat(TrustedPlayers, ","));
 end
 
@@ -120,7 +126,6 @@ end
 function BoostedRolls:removePlayerFromTrusted(playerName)
     playerName = strtrim(playerName);
 
-    -- No point removing the player if he's not trusted in the first place
     if (GL:empty(playerName)
         or not self:playerIsTrusted(playerName)
     ) then
@@ -137,12 +142,14 @@ function BoostedRolls:removePlayerFromTrusted(playerName)
         if (not GL:iEquals(trustedPlayer, nameFormatted)
             and not GL:iEquals(trustedPlayer, fqn)
         ) then
-            tinsert(NewTrustedPlayers, trustedPlayer);
+            table.insert(NewTrustedPlayers, trustedPlayer);
         end
     end
 
     GL.Settings:set("BoostedRolls.automaticallyAcceptDataFrom", table.concat(NewTrustedPlayers, ","));
 end
+
+--[[ STATE ]]
 
 --- Check whether boosted rolls are enabled
 ---
@@ -158,123 +165,52 @@ function BoostedRolls:available()
     return GL:higherThanZero(DB:get("BoostedRolls.MetaData.importedAt", 0));
 end
 
---- Draw either the importer or overview
---- based on the current boosted roll data
+--- Determine if a player is present in the table
 ---
----@return nil
-function BoostedRolls:draw()
-    -- Show the boosted rolls overview instead
-    GL.Interface.BoostedRolls.Overview:draw();
+---@param name string
+---@return boolean
+function BoostedRolls:hasPoints(name)
+    if (type(name) ~= "string") then
+        return false;
+    end
+
+    local normalizedName = self:normalizedName(name);
+
+    return self.MaterializedData.DetailsByPlayerName[normalizedName] ~= nil;
 end
 
---- Checks and handles whisper commands if enabled.
+--- Get a player's points
 ---
----@param _ string
----@param message string
----@param sender string
----@return nil
-function BoostedRolls:handleWhisperCommand(_, message, sender)
-    local validPrefixDetected = false;
-    for _, prefix in pairs(GL:explode(L["!bonus|!rb|!br"], "|") or {}) do
-        if (GL:strStartsWith(message, prefix)) then
-            validPrefixDetected = true;
-            break;
-        end
+---@param name string
+---@return number
+function BoostedRolls:getPoints(name)
+    local default = GL.Settings:get("BoostedRolls.defaultPoints", 0);
+
+    if (type(name) ~= "string") then
+        return default;
     end
 
-    if (not validPrefixDetected) then
-        return;
-    end
+    local normalizedName = self:normalizedName(name);
 
-    local args = GL:explode(message, " ");
-
-    -- See if name is given.
-    if (#args > 1) then
-        local name = self:normalizedName(args[2]);
-        local points = self:getPoints(name);
-        local low = self:minBoostedRoll(points);
-        local high = self:maxBoostedRoll(points);
-        local ext = "";
-        if (not self:hasPoints(name)) then
-            ext = " " .. L.CHAT["(default)"];
-        end
-        GL:sendChatMessage(
-            (L.CHAT["Player %s's %s roll is /rnd %d-%d%s"]):format(GL:capitalize(name), GL.Settings:get("BoostedRolls.identifier", "BR"), low, high, ext),
-            "WHISPER", nil, sender
-        );
-        return;
-    end
-
-    local name = GL:formatPlayerName(sender);
-    name = self:normalizedName(name);
-
-    local points = self:getPoints(name);
-    local low = self:minBoostedRoll(points);
-    local high = self:maxBoostedRoll(points);
-    local ext = "";
-    if (not self:hasPoints(name)) then
-        ext = " " .. L.CHAT["(default)"];
-    end
-    GL:sendChatMessage(
-        (L.CHAT["Your %s roll is /rnd %d-%d%s"]):format(GL.Settings:get("BoostedRolls.identifier", "BR"), low, high, ext),
-        "WHISPER", nil, sender
-    );
+    return GL:tableGet(self.MaterializedData or {}, "DetailsByPlayerName." .. normalizedName .. ".points", default);
 end
 
---- Materialize the boosted roll data to make it more accessible during runtime
----
----@return nil
-function BoostedRolls:materializeData()
-    local Aliases = {}; -- Direct access to aliases
-    local DetailsByPlayerName = {}; -- Details including aliases by player name
-
-    --- Create entries from points data
-    for name, points in pairs(DB:get("BoostedRolls.Points", {})) do
-        name = self:playerGUID(name);
-        points = self:toPoints(points or 0);
-
-        if (type(name) == "string"
-            and not GL:empty(name)
-            and not DetailsByPlayerName[name]
-        ) then
-            GL:tableSet(DetailsByPlayerName, name .. ".Aliases", {});
-            DetailsByPlayerName[name].points = points;
-            DetailsByPlayerName[name].class = "";
-        end
-    end
-
-    --- Add aliases
-    for alias, main in pairs(DB:get("BoostedRolls.Aliases", {})) do
-        alias = self:playerGUID(alias or "");
-        main = self:playerGUID(main or "");
-
-        if (type(alias) == "string" and type(main) == "string"
-            and not GL:empty(alias) and not GL:empty(main)
-        ) then
-            if (DetailsByPlayerName[main] and not DetailsByPlayerName[alias]) then
-                tinsert(DetailsByPlayerName[main].Aliases, alias);
-            end
-        end
-    end
-
-    self.MaterializedData.Aliases = Aliases;
-    self.MaterializedData.DetailsByPlayerName = DetailsByPlayerName;
-end
+--[[ ROLL MATH ]]
 
 --- Format a boosted roll.
 ---
 ---@param points any
----@return number if valid, else nil
+---@return number|nil
 function BoostedRolls:toPoints(points)
     points = tonumber(points);
 
     if not points then
-        return nil;
+        return;
     end
 
     points = math.max(0, math.floor(points));
     return points;
-end;
+end
 
 --- Calculate roll points from points.
 ---
@@ -282,7 +218,7 @@ end;
 ---@return number
 function BoostedRolls:rollPoints(points)
     return math.min(GL.Settings:get("BoostedRolls.reserveThreshold", 0), points);
-end;
+end
 
 --- Calculate reserve from points.
 ---
@@ -290,7 +226,7 @@ end;
 ---@return number
 function BoostedRolls:reserve(points)
     return math.max(0, points - GL.Settings:get("BoostedRolls.reserveThreshold", 0));
-end;
+end
 
 --- Calculate max roll from points.
 ---
@@ -298,7 +234,7 @@ end;
 ---@return number
 function BoostedRolls:maxBoostedRoll(points)
     return math.max(1, math.min(GL.Settings:get("BoostedRolls.reserveThreshold", 0), points));
-end;
+end
 
 --- Calculate min roll from points.
 ---
@@ -322,7 +258,7 @@ function BoostedRolls:minBoostedRoll(points)
     -- /rnd 60-160 (60 points) yields 101 possible numbers which would give an undesired disadvantage,
     -- hence the -99 which effectively turns it into /rnd 61-160 instead
     return math.max(1, self:maxBoostedRoll(points) - 99);
-end;
+end
 
 --- Detect boosted rolls.
 ---
@@ -339,7 +275,9 @@ function BoostedRolls:isBoostedRoll(low, high)
 
     --- Check minimum.
     return self:minBoostedRoll(high) == low;
-end;
+end
+
+--[[ MUTATIONS ]]
 
 --- Clear all boosted roll data
 ---
@@ -351,7 +289,6 @@ function BoostedRolls:clear()
         MetaData = {},
     };
     self.MaterializedData = {
-        Aliases = {},
         DetailsByPlayerName = {},
     };
 
@@ -363,7 +300,7 @@ end
 ---
 ---@param name string
 ---@param aliases table
----@param dontBroadcast boolean
+---@param dontBroadcast? boolean
 ---@return nil
 function BoostedRolls:setAliases(name, aliases, dontBroadcast)
     if (type(name) ~= "string") then
@@ -389,7 +326,7 @@ function BoostedRolls:setAliases(name, aliases, dontBroadcast)
             --- Check that this alias does not yet exist, otherwise skip.
             if (not DB.BoostedRolls.Aliases[alias]) then
                 DB.BoostedRolls.Aliases[alias] = mainGUID;
-                tinsert(cleanAliases, alias);
+                table.insert(cleanAliases, alias);
             end
         end
         self.MaterializedData.DetailsByPlayerName[mainGUID].Aliases = cleanAliases;
@@ -403,46 +340,12 @@ function BoostedRolls:setAliases(name, aliases, dontBroadcast)
     end
 end
 
---- Determine if a player is present in the table
----
----@param name string
----@return boolean
-function BoostedRolls:hasPoints(name)
-    if (type(name) ~= "string") then
-        return false;
-    end
-
-    local normalizedName = self:normalizedName(name);
-
-    if (self.MaterializedData.DetailsByPlayerName[normalizedName]) then
-        return true;
-    end
-
-    return false;
-end
-
---- Get a player's points
----
----@param name string
----@return nil
-function BoostedRolls:getPoints(name)
-    local default = GL.Settings:get("BoostedRolls.defaultPoints", 0);
-
-    if (type(name) ~= "string") then
-        return default;
-    end
-
-    local normalizedName = self:normalizedName(name);
-
-    return GL:tableGet(self.MaterializedData or {}, "DetailsByPlayerName." .. normalizedName .. ".points", default);
-end
-
 --- Set a player's points
 ---
 ---@param name string
 ---@param points number
----@param dontBroadcast boolean
----@return nil
+---@param dontBroadcast? boolean
+---@return number|nil
 function BoostedRolls:setPoints(name, points, dontBroadcast)
     if (type(name) ~= "string") then
         return;
@@ -456,7 +359,7 @@ function BoostedRolls:setPoints(name, points, dontBroadcast)
         return;
     end
 
-    points = min(GL.Settings:get("BoostedRolls.maxmimumPoints", points), points);
+    points = math.min(GL.Settings:get("BoostedRolls.maxmimumPoints", points), points);
     self.MaterializedData.DetailsByPlayerName[normalizedName].points = points;
     DB:set("BoostedRolls.Points." .. normalizedName, points);
     DB:set("BoostedRolls.MetaData.updatedAt", GetServerTime());
@@ -473,6 +376,7 @@ end
 --- Delete an entry
 ---
 ---@param name string
+---@param dontBroadcast? boolean
 ---@return nil
 function BoostedRolls:deletePoints(name, dontBroadcast)
     if (type(name) ~= "string") then
@@ -505,7 +409,7 @@ end
 --- Modify a player's points
 ---
 ---@param name string
----@param points number
+---@param change number
 ---@return nil
 function BoostedRolls:modifyPoints(name, change)
     if (type(name) ~= "string") then
@@ -523,12 +427,111 @@ function BoostedRolls:modifyPoints(name, change)
     self:queueUpdate(normalizedName, points);
 end
 
---- Import a CSV or TSV data string
+--- Add points to a give user's balance
 ---
----@param data string
----@param openOverview boolean (optional, default: false)
----@param MetaData table (optional, default: auto generate new metadata)
----@return boolean
+---@param playerName string
+---@param points number
+---
+---@return number
+function BoostedRolls:addPoints(playerName, points)
+    playerName = self:normalizedName(playerName);
+    local currentPoints = self:getPoints(playerName) or 0;
+
+    return self:queueUpdate(playerName, currentPoints + points);
+end
+
+--- Subtract points from a give user's balance
+---
+---@param playerName string
+---@param points number
+function BoostedRolls:subtractPoints(playerName, points)
+    if (points <= 0) then
+        return;
+    end
+
+    playerName = self:normalizedName(playerName);
+    local currentPoints = self:getPoints(playerName) or 0;
+
+    self:queueUpdate(playerName, currentPoints - points);
+end
+
+--- Adds missing raiders with default points
+---
+---@return nil
+function BoostedRolls:addMissingRaiders()
+    local default = GL.Settings:get("BoostedRolls.defaultPoints", 0);
+
+    -- Not in a group, add the current player
+    if (not GL.User.isInGroup) then
+        if (not self:hasPoints(self:myGUID())) then
+            DB:set("BoostedRolls.Points." .. self:myGUID(), default);
+        end
+
+    -- Go through everyone in the raid
+    else
+        for _, Player in pairs(GL.User:groupMembers()) do
+            local normalizedName = self:normalizedName(Player.fqn);
+            if (not self:hasPoints(normalizedName)) then
+                DB:set("BoostedRolls.Points." .. normalizedName, default);
+            end
+        end
+    end
+
+    DB:set("BoostedRolls.MetaData.importedAt", GetServerTime());
+    DB:set("BoostedRolls.MetaData.updatedAt", GetServerTime());
+
+    if (not DB:get("BoostedRolls.MetaData.uuid")) then
+        DB:set("BoostedRolls.MetaData.uuid", GL:uuid());
+    end
+
+    self:materializeData();
+end
+
+--[[ MATERIALIZATION ]]
+
+--- Materialize the boosted roll data to make it more accessible during runtime
+---
+---@return nil
+function BoostedRolls:materializeData()
+    local DetailsByPlayerName = {}; -- Details including aliases by player name
+
+    --- Create entries from points data
+    for name, points in pairs(DB:get("BoostedRolls.Points", {})) do
+        name = self:playerGUID(name);
+        points = self:toPoints(points or 0);
+
+        if (type(name) == "string"
+            and not GL:empty(name)
+            and not DetailsByPlayerName[name]
+        ) then
+            GL:tableSet(DetailsByPlayerName, name .. ".Aliases", {});
+            DetailsByPlayerName[name].points = points;
+            DetailsByPlayerName[name].class = "";
+        end
+    end
+
+    --- Add aliases
+    for alias, main in pairs(DB:get("BoostedRolls.Aliases", {})) do
+        alias = self:playerGUID(alias or "");
+        main = self:playerGUID(main or "");
+
+        if (type(alias) == "string" and type(main) == "string"
+            and not GL:empty(alias) and not GL:empty(main)
+        ) then
+            if (DetailsByPlayerName[main] and not DetailsByPlayerName[alias]) then
+                table.insert(DetailsByPlayerName[main].Aliases, alias);
+            end
+        end
+    end
+
+    self.MaterializedData.DetailsByPlayerName = DetailsByPlayerName;
+end
+
+--[[ IMPORT & EXPORT ]]
+
+--- Set the importer's status message, if the importer is open.
+---@param message string
+---@return nil
 local function setImporterStatus(message)
     local Label = GL.Interface:get("BoostedRolls.Importer", "Label.StatusMessage");
 
@@ -537,6 +540,12 @@ local function setImporterStatus(message)
     end
 end
 
+--- Import a CSV or TSV data string
+---
+---@param data string
+---@param openOverview? boolean Defaults to false
+---@param MetaData? table Defaults to freshly generated metadata
+---@return boolean
 function BoostedRolls:import(data, openOverview, MetaData)
     -- Make sure all the required properties are available and of the correct type
     if (GL:empty(data)) then
@@ -582,7 +591,7 @@ function BoostedRolls:import(data, openOverview, MetaData)
         return false;
     end
 
-    local MetaData = MetaData or {};
+    MetaData = MetaData or {};
 
     DB.BoostedRolls = {
         Points = Points,
@@ -615,42 +624,10 @@ function BoostedRolls:import(data, openOverview, MetaData)
     return true;
 end
 
---- Adds missing raiders with default points
----
----@return nil
-function BoostedRolls:addMissingRaiders()
-    local default = GL.Settings:get("BoostedRolls.defaultPoints", 0);
-
-    -- Not in a group, add the current player
-    if (not GL.User.isInGroup) then
-        if (not self:hasPoints(BoostedRolls:myGUID())) then
-            DB:set("BoostedRolls.Points." .. BoostedRolls:myGUID(), default);
-        end
-
-    -- Go through everyone in the raid
-    else
-        for _, Player in pairs(GL.User:groupMembers()) do
-            local normalizedName = self:normalizedName(Player.fqn);
-            if (not self:hasPoints(normalizedName)) then
-                DB:set("BoostedRolls.Points." .. normalizedName, default);
-            end
-        end
-    end
-
-    DB:set("BoostedRolls.MetaData.importedAt", GetServerTime());
-    DB:set("BoostedRolls.MetaData.updatedAt", GetServerTime());
-
-    if (not DB:get("BoostedRolls.MetaData.uuid")) then
-        DB:set("BoostedRolls.MetaData.uuid", GL:uuid());
-    end
-
-    self:materializeData();
-end
-
 --- Export to CSV
 ---
 ---@param displayFrame boolean
----@return nil
+---@return string
 function BoostedRolls:export(displayFrame)
     -- Calculate max aliases to output a CSV compliant string
     local numAliases = 0;
@@ -679,6 +656,8 @@ function BoostedRolls:export(displayFrame)
 
     return csv;
 end
+
+--[[ COMM ]]
 
 --- Broadcast our boosted roll data to the raid or group
 ---
@@ -753,9 +732,7 @@ function BoostedRolls:broadcast()
 
     -- We're about to send a lot of data which will put strain on CTL
     -- Make sure we're out of combat before doing so!
-    GL:afterCombatDo(function ()
-        Broadcast();
-    end, function ()
+    GL:afterCombatDo(Broadcast, function ()
         GL:notice(L["You are currently in combat, delaying broadcast"]);
     end);
 
@@ -765,6 +742,7 @@ end
 --- Process an incoming boosted roll broadcast
 ---
 ---@param CommMessage CommMessage
+---@return boolean|nil
 function BoostedRolls:receiveBroadcast(CommMessage)
     -- No need to update our tables if we broadcasted them ourselves
     if (CommMessage.Sender.isSelf) then
@@ -773,7 +751,7 @@ function BoostedRolls:receiveBroadcast(CommMessage)
 
     local importString = CommMessage.content.importString or "";
     local MetaData = CommMessage.content.MetaData or {};
-    local importBroadcast = (function ()
+    local importBroadcast = function ()
         if (GL:empty(importString)) then
             GL:warning((L["Couldn't process BoostedRolls data received from %s"]):format(CommMessage.Sender.name));
 
@@ -788,7 +766,7 @@ function BoostedRolls:receiveBroadcast(CommMessage)
         end
 
         return result;
-    end);
+    end;
 
     --- Check whether we can trust this sender (and as such immediately accept the incoming broadcast)
     if (self:playerIsTrusted(CommMessage.Sender.name)
@@ -949,40 +927,13 @@ function BoostedRolls:replyToDataRequest(CommMessage)
     }):send();
 end
 
---- Add points to a give user's balance
----
----@param playerName string
----@param points number
----
----@return number
-function BoostedRolls:addPoints(playerName, points)
-    playerName = self:normalizedName(playerName);
-    local currentPoints = self:getPoints(playerName) or 0;
-
-    return self:queueUpdate(playerName, currentPoints + points);
-end
-
---- Subtract points from a give user's balance
----
----@param playerName string
----@param points number
-function BoostedRolls:subtractPoints(playerName, points)
-    if (points <= 0) then
-        return;
-    end
-
-    playerName = self:normalizedName(playerName);
-    local currentPoints = self:getPoints(playerName) or 0;
-
-    self:queueUpdate(playerName, currentPoints - points);
-end
-
 --- Queue an update until broadcast is finished
 ---
 ---@param playerName string
----@param points number
----@param aliases table
----@param delete boolean
+---@param points? number
+---@param aliases? table
+---@param delete? boolean
+---@return number
 function BoostedRolls:queueUpdate(playerName, points, aliases, delete)
     local dontBroadcast = true;
     if (aliases) then
@@ -1004,7 +955,7 @@ function BoostedRolls:queueUpdate(playerName, points, aliases, delete)
         delete = delete or false,
     };
 
-    tinsert(self.QueuedUpdates, Update);
+    table.insert(self.QueuedUpdates, Update);
 
     -- Fire an event to let the application know that an update was queued
     GL.Events:fire("GL.BOOSTED_ROLLS_UPDATE_QUEUED");
@@ -1015,7 +966,7 @@ end
 
 --- Send out the queued updates
 ---
----@return nil
+---@return boolean|nil
 function BoostedRolls:broadcastQueuedUpdates()
     if (not GL.User.isInGroup) then
         return false;
@@ -1041,9 +992,10 @@ end
 --- Process an incoming boosted roll update
 ---
 ---@param playerName string
----@param points number
----@param aliases table
----@param delete boolean
+---@param points? number
+---@param aliases? table
+---@param delete? boolean
+---@return boolean
 function BoostedRolls:broadcastUpdate(playerName, points, aliases, delete)
     if (not self:userIsAllowedToBroadcast()) then
         GL:warning(L["You need to be the master looter or have an assist / lead role!"]);
@@ -1058,19 +1010,19 @@ function BoostedRolls:broadcastUpdate(playerName, points, aliases, delete)
 
     GL:message(L["Broadcasting..."]);
 
-        GL.CommMessage.new({
-            action = CommActions.broadcastBoostedRollsMutation,
-            content = {
-                updates = {{
-                    playerName = playerName,
-                    points = points or nil,
-                    aliases = aliases or nil,
-                    delete = delete or false,
-                }},
-                uuid = DB:get("BoostedRolls.MetaData.uuid", ""),
-            },
-            channel = "GROUP",
-        }):send();
+    GL.CommMessage.new({
+        action = CommActions.broadcastBoostedRollsMutation,
+        content = {
+            updates = {{
+                playerName = playerName,
+                points = points or nil,
+                aliases = aliases or nil,
+                delete = delete or false,
+            }},
+            uuid = DB:get("BoostedRolls.MetaData.uuid", ""),
+        },
+        channel = "GROUP",
+    }):send();
 
     return true;
 end
@@ -1078,6 +1030,7 @@ end
 --- Process an incoming boosted roll update
 ---
 ---@param CommMessage CommMessage
+---@return boolean|nil
 function BoostedRolls:receiveUpdate(CommMessage)
     -- No need to update our tables if we broadcasted them ourselves
     if (CommMessage.Sender.isSelf) then
@@ -1129,4 +1082,57 @@ end
 ---@return boolean
 function BoostedRolls:userIsAllowedToBroadcast()
     return GL.User.isInGroup and (GL.User.isMasterLooter or GL.User.hasAssist);
+end
+
+--[[ UI ENTRY POINTS ]]
+
+--- Draw either the importer or overview
+--- based on the current boosted roll data
+---
+---@return nil
+function BoostedRolls:draw()
+    -- Show the boosted rolls overview instead
+    GL.Interface.BoostedRolls.Overview:draw();
+end
+
+--- Checks and handles whisper commands if enabled.
+---
+---@param _ string
+---@param message string
+---@param sender string
+---@return nil
+function BoostedRolls:handleWhisperCommand(_, message, sender)
+    local validPrefixDetected = false;
+    for _, prefix in pairs(GL:explode(L["!bonus|!rb|!br"], "|") or {}) do
+        if (GL:strStartsWith(message, prefix)) then
+            validPrefixDetected = true;
+            break;
+        end
+    end
+
+    if (not validPrefixDetected) then
+        return;
+    end
+
+    local args = GL:explode(message, " ");
+
+    -- See if a name is given, otherwise look up the sender's own roll
+    local askingForSelf = #args <= 1;
+    local name = askingForSelf and GL:formatPlayerName(sender) or args[2];
+    name = self:normalizedName(name);
+
+    local points = self:getPoints(name);
+    local low = self:minBoostedRoll(points);
+    local high = self:maxBoostedRoll(points);
+    local ext = "";
+    if (not self:hasPoints(name)) then
+        ext = " " .. L.CHAT["(default)"];
+    end
+
+    local identifier = GL.Settings:get("BoostedRolls.identifier", "BR");
+    local chatMessage = askingForSelf
+        and (L.CHAT["Your %s roll is /rnd %d-%d%s"]):format(identifier, low, high, ext)
+        or (L.CHAT["Player %s's %s roll is /rnd %d-%d%s"]):format(GL:capitalize(name), identifier, low, high, ext);
+
+    GL:sendChatMessage(chatMessage, "WHISPER", nil, sender);
 end

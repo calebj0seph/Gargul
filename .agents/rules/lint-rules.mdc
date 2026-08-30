@@ -30,6 +30,7 @@ alwaysApply: true
 
 ## Doc & style
 - Functions that return nothing: add `---@return nil`. Semicolons at end of statements. Parentheses around `if` condition; use `elseif` not `else if`. Anonymous functions: space before `()`: `function () end`. Decimals in (0,1): `.5` not `0.5`. Strings: double quotes. Format: `("%s"):format(x)` not `string.format(...)`. Single table arg: explicit parens `fn({ ... })` not `fn{ ... }`. Default-arg pattern: use `x = x == nil and default or x` not `if (x == nil) then x = default; end`.
+- Optional params: use `---@param name? type` not `---@param name type|nil`.
 
 ## Class definitions (GL)
 **Define the class in a local first, then immediately assign to GL (with `---@type ClassName` on that line).** Do not put the GL assignment at the end of the file. Never assign an inline table to `GL.*` and then take a local reference.
