@@ -16,6 +16,7 @@ local BoostedRolls = {
     },
     QueuedUpdates = {},
     QueuedUpdateBroadcastTimer = false,
+    QueuedUpdateFirstQueuedAt = false,
 };
 GL.BoostedRolls = BoostedRolls; ---@type BoostedRolls
 
@@ -37,13 +38,22 @@ function BoostedRolls:_init()
     GL.Events:register("BoostedRollsUserJoinedGroupListener", "GL.USER_JOINED_NEW_GROUP", function () self:requestData(); end);
 
     -- Make sure BoostedRoll changes are only broadcasted once every 3 seconds
+    -- but never wait longer than 10 seconds in total in case updates keep coming in
     GL.Events:register("BoostedRollsUpdateQueuedListener", "GL.BOOSTED_ROLLS_UPDATE_QUEUED", function ()
+        local debounceSeconds = 3;
+        local maxWaitSeconds = 10;
+
         GL.Interface.BoostedRolls.Overview:refreshTable();
         GL.Ace:CancelTimer(self.QueuedUpdateBroadcastTimer);
 
+        self.QueuedUpdateFirstQueuedAt = self.QueuedUpdateFirstQueuedAt or GetServerTime();
+        local waitedSoFar = GetServerTime() - self.QueuedUpdateFirstQueuedAt;
+        local delay = math.max(0, math.min(debounceSeconds, maxWaitSeconds - waitedSoFar));
+
         self.QueuedUpdateBroadcastTimer = GL.Ace:ScheduleTimer(function ()
+            self.QueuedUpdateFirstQueuedAt = false;
             self:broadcastQueuedUpdates();
-        end, 3);
+        end, delay);
     end);
 
     self:materializeData();
@@ -359,7 +369,7 @@ function BoostedRolls:setPoints(name, points, dontBroadcast)
         return;
     end
 
-    points = math.min(GL.Settings:get("BoostedRolls.maxmimumPoints", points), points);
+    points = math.max(0, math.min(GL.Settings:get("BoostedRolls.maxmimumPoints", points), points));
     self.MaterializedData.DetailsByPlayerName[normalizedName].points = points;
     DB:set("BoostedRolls.Points." .. normalizedName, points);
     DB:set("BoostedRolls.MetaData.updatedAt", GetServerTime());
@@ -460,11 +470,13 @@ end
 ---@return nil
 function BoostedRolls:addMissingRaiders()
     local default = GL.Settings:get("BoostedRolls.defaultPoints", 0);
+    local AddedPlayers = {};
 
     -- Not in a group, add the current player
     if (not GL.User.isInGroup) then
         if (not self:hasPoints(self:myGUID())) then
             DB:set("BoostedRolls.Points." .. self:myGUID(), default);
+            table.insert(AddedPlayers, self:myGUID());
         end
 
     -- Go through everyone in the raid
@@ -473,8 +485,13 @@ function BoostedRolls:addMissingRaiders()
             local normalizedName = self:normalizedName(Player.fqn);
             if (not self:hasPoints(normalizedName)) then
                 DB:set("BoostedRolls.Points." .. normalizedName, default);
+                table.insert(AddedPlayers, normalizedName);
             end
         end
+    end
+
+    if (GL:empty(AddedPlayers)) then
+        return;
     end
 
     DB:set("BoostedRolls.MetaData.importedAt", GetServerTime());
@@ -485,6 +502,20 @@ function BoostedRolls:addMissingRaiders()
     end
 
     self:materializeData();
+
+    -- Let the rest of the group know about the newly added players
+    if (GL.Settings:get("BoostedRolls.automaticallyShareData")
+        and self:userIsAllowedToBroadcast()
+    ) then
+        for _, playerName in pairs(AddedPlayers) do
+            table.insert(self.QueuedUpdates, {
+                playerName = playerName,
+                points = default,
+            });
+        end
+
+        GL.Events:fire("GL.BOOSTED_ROLLS_UPDATE_QUEUED");
+    end
 end
 
 --[[ MATERIALIZATION ]]
@@ -506,7 +537,7 @@ function BoostedRolls:materializeData()
         ) then
             GL:tableSet(DetailsByPlayerName, name .. ".Aliases", {});
             DetailsByPlayerName[name].points = points;
-            DetailsByPlayerName[name].class = "";
+            DetailsByPlayerName[name].class = GL.Player:classByName(name);
         end
     end
 
@@ -555,11 +586,15 @@ function BoostedRolls:import(data, openOverview, MetaData)
 
     local Points = {};
     local Aliases = {};
+    local totalLines = 0;
+    local skippedLines = 0;
 
     -- If the user copy/pasted from google sheets there will be addition quotes that need to be removed
     data = data:gsub("\"", "");
 
     for line in data:gmatch("[^\n]+") do
+        totalLines = totalLines + 1;
+
         --- We expect lines to be in the form,
         --- where the individual variables are comma, tab, or spaces separated:
         --- PlayerName,Points,Alias1,Alias2...
@@ -582,6 +617,8 @@ function BoostedRolls:import(data, openOverview, MetaData)
                     Aliases[alias] = playerName;
                 end
             end
+        else
+            skippedLines = skippedLines + 1;
         end
     end
 
@@ -603,7 +640,11 @@ function BoostedRolls:import(data, openOverview, MetaData)
         },
     };
 
-    GL:success(L["Import of boosted roll data successful"]);
+    if (skippedLines > 0) then
+        GL:success((L["Import of boosted roll data successful, %d/%d line(s) were skipped due to an invalid format"]):format(skippedLines, totalLines));
+    else
+        GL:success(L["Import of boosted roll data successful"]);
+    end
     GL.Events:fire("GL.BOOSTEDROLLS_IMPORTED");
 
     self:materializeData();
@@ -867,7 +908,12 @@ function BoostedRolls:requestData()
         recipient = playerToRequestFrom,
     }):send();
 
-    self.requestingData = false;
+    -- Keep the guard up for a bit instead of resetting it immediately, so that
+    -- multiple requestData() calls in quick succession (e.g. repeated group-join events)
+    -- don't all fire off a whisper
+    GL.Ace:ScheduleTimer(function ()
+        self.requestingData = false;
+    end, 5);
 end
 
 --- Reply to a player's BoostedRolls data request

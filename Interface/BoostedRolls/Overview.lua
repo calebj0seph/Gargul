@@ -457,24 +457,7 @@ function Overview:refreshTable()
         return;
     end
 
-    local PlayerData = {};
-
-    -- We can't do a direct assignment because we want to edit this table in a bit
-    for playerName, Entry in pairs(BoostedRolls.MaterializedData.DetailsByPlayerName) do
-        -- Augment with existing class data
-        local class = nil;
-        if (PlayerData[playerName]) then
-            class = PlayerData[playerName].class;
-        end
-
-        PlayerData[playerName] = Entry;
-
-        if (type(class) == "string") then
-            PlayerData[playerName].class = class;
-        else
-            PlayerData[playerName].class = GL.Player:classByName(playerName);
-        end
-    end
+    local PlayerData = BoostedRolls.MaterializedData.DetailsByPlayerName;
 
     local TableData = {};
 
