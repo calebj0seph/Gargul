@@ -529,10 +529,18 @@ end
 ---@param openOverview boolean (optional, default: false)
 ---@param MetaData table (optional, default: auto generate new metadata)
 ---@return boolean
+local function setImporterStatus(message)
+    local Label = GL.Interface:get("BoostedRolls.Importer", "Label.StatusMessage");
+
+    if (Label) then
+        Label:SetText(message);
+    end
+end
+
 function BoostedRolls:import(data, openOverview, MetaData)
     -- Make sure all the required properties are available and of the correct type
     if (GL:empty(data)) then
-        GL.Interface:get("BoostedRolls.Importer", "Label.StatusMessage"):SetText(L["Invalid data supplied"]);
+        setImporterStatus(L["Invalid data supplied"]);
         return false;
     end
 
@@ -569,8 +577,7 @@ function BoostedRolls:import(data, openOverview, MetaData)
     end
 
     if (GL:empty(Points)) then
-        local errorMessage = L["Invalid data provided. Make sure that the contents follows the required format and no header row is included"];
-        GL.Interface:get("BoostedRolls.Importer", "Label.StatusMessage"):SetText(errorMessage);
+        setImporterStatus(L["Invalid data provided. Make sure that the contents follows the required format and no header row is included"]);
 
         return false;
     end
@@ -768,12 +775,12 @@ function BoostedRolls:receiveBroadcast(CommMessage)
     local MetaData = CommMessage.content.MetaData or {};
     local importBroadcast = (function ()
         if (GL:empty(importString)) then
-            GL:warning((L["Attempting to process incoming BoostedRolls data from %s"]):format(CommMessage.Sender.name));
+            GL:warning((L["Couldn't process BoostedRolls data received from %s"]):format(CommMessage.Sender.name));
 
             return false;
         end
 
-        GL:warning((L["Couldn't process BoostedRolls data received from %s"]):format(CommMessage.Sender.name) .. CommMessage.Sender.name);
+        GL:warning((L["Attempting to process incoming BoostedRolls data from %s"]):format(CommMessage.Sender.name));
 
         local result = self:import(importString, false, MetaData);
         if (result) then
@@ -1051,19 +1058,19 @@ function BoostedRolls:broadcastUpdate(playerName, points, aliases, delete)
 
     GL:message(L["Broadcasting..."]);
 
-    GL.CommMessage.new({
-        action = CommActions.broadcastBoostedRollsMutation,
-        content = {
-            updates = {
-                playerName = playerName,
-                points = points or nil,
-                aliases = aliases or nil,
-                delete = delete or false,
+        GL.CommMessage.new({
+            action = CommActions.broadcastBoostedRollsMutation,
+            content = {
+                updates = {{
+                    playerName = playerName,
+                    points = points or nil,
+                    aliases = aliases or nil,
+                    delete = delete or false,
+                }},
+                uuid = DB:get("BoostedRolls.MetaData.uuid", ""),
             },
-            uuid = DB:get("BoostedRolls.MetaData.uuid", ""),
-        },
-        channel = "GROUP",
-    }):send();
+            channel = "GROUP",
+        }):send();
 
     return true;
 end
