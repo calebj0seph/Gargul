@@ -475,6 +475,18 @@ function Overview:drawCheckboxes(Checkboxes, Parent)
         end);
         GL.Interface:set(GL.Settings, Entry.setting, Checkbox);
         Parent:AddChild(Checkbox);
+
+        if (Entry.perCharacter) then
+            local Scope = AceGUI:Create("CheckBox");
+            Scope:SetValue(GL.Settings:isPerCharacter(Entry.setting));
+            Scope:SetLabel(L["Only for this character"]);
+            Scope:SetFullWidth(true);
+            Scope:SetCallback("OnValueChanged", function ()
+                GL.Settings:setPerCharacter(Entry.setting, Scope:GetValue());
+                Checkbox:SetValue(GL.Settings:get(Entry.setting));
+            end);
+            Parent:AddChild(Scope);
+        end
     end
 end
 

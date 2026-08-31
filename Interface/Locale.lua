@@ -25,6 +25,7 @@ function Locale:open(forwardToSettings)
     self.isVisible = true;
 
     local Window = _G[self.windowName] or self:build();
+    Window.PerCharacter:SetChecked(Settings:isPerCharacter("chatLocale"));
 
     Window:Show();
     return Window;
@@ -47,7 +48,7 @@ function Locale:build()
     local Window = Interface:createWindow({
         name = self.windowName,
         width = 375,
-        height = 240,
+        height = 275,
         hideMinimizeButton = true,
         hideResizeButton = true,
     });
@@ -105,9 +106,22 @@ function Locale:build()
     Note:SetPoint("RIGHT", Window, "RIGHT", -20, 0);
     Note:SetJustifyH("CENTER");
 
+    ---@type CheckButton
+    local PerCharacter = Interface:createCheckbox({
+        Parent = Window,
+        checked = Settings:isPerCharacter("chatLocale"),
+        label = L["Only for this character"],
+        tooltip = L["Other characters keep using the account-wide language"],
+    });
+    -- The label sits to the right of the checkbox, so shift left by half its width to center the pair
+    local labelGap = 4;
+    PerCharacter:SetPoint("TOP", Note, "BOTTOM", -(labelGap + PerCharacter.Label:GetStringWidth()) / 2, -10);
+    Window.PerCharacter = PerCharacter;
+
     local OkButton = Interface:dynamicPanelButton(Window, L["Ok"]);
     OkButton:SetPoint("BOTTOMLEFT", Window, "BOTTOMLEFT", 20, 30);
     OkButton:SetScript("OnClick", function ()
+        Settings:setPerCharacter("chatLocale", PerCharacter:GetChecked(), true);
         Settings:set("chatLocale", Locales:GetValue() or "enUS");
         self:close();
 

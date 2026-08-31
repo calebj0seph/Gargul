@@ -26,6 +26,20 @@ local Settings = {
 };
 GL.Settings = Settings;
 
+--- This character's PerCharacter subtree, nil until it has at least one override
+---@type table|nil
+local Overrides;
+
+---@type boolean
+local hasOverrides = false;
+
+--- Dots are stripped since they're the settings path separator
+---@return string
+local function characterKey()
+    local realm = (GetRealmName() or ""):gsub("[%s%-%.]", "");
+    return ("%s-%s"):format(UnitName("player") or "", realm);
+end
+
 function Settings:_init()
     -- No need to initialize this class twice
     if (self._initialized) then
@@ -37,6 +51,7 @@ function Settings:_init()
 
     -- Combine defaults and user settings
     self:overrideDefaultsWithUserSettings();
+    self:refreshCharacterOverrides();
 
     -- Prepare the options / config frame
     local Frame = CreateFrame("Frame", nil, InterfaceOptionsFramePanelContainer);
@@ -149,6 +164,14 @@ function Settings:resetToDefault()
 
     -- Combine defaults and user settings
     self:overrideDefaultsWithUserSettings();
+    self:refreshCharacterOverrides();
+end
+
+--- Point Overrides at this character's PerCharacter subtree in Active
+---@return nil
+function Settings:refreshCharacterOverrides()
+    Overrides = GL:tableGet(self.Active, ("PerCharacter.%s"):format(characterKey()));
+    hasOverrides = Overrides ~= nil and next(Overrides) ~= nil;
 end
 
 --- Override the addon's default settings with the user's custom settings
@@ -234,6 +257,14 @@ end
 ---@param default any
 ---@return any
 function Settings:get(keyString, default)
+    if (hasOverrides) then
+        local value = GL:tableGet(Overrides, keyString);
+
+        if (value ~= nil) then
+            return value;
+        end
+    end
+
     -- Just in case something went wrong with merging the default settings
     if (type(default) == "nil") then
         default = GL:tableGet(self.Defaults, keyString);
@@ -250,7 +281,12 @@ end
 ---@param quiet? boolean Should trigger event?
 ---@return boolean
 function Settings:set(keyString, value, quiet)
-    local success = GL:tableSet(self.Active, keyString, value);
+    local success;
+    if (hasOverrides and GL:tableGet(Overrides, keyString) ~= nil) then
+        success = GL:tableSet(Overrides, keyString, value);
+    else
+        success = GL:tableSet(self.Active, keyString, value);
+    end
 
     if (success and not quiet) then
         GL.Events:fire("GL.SETTING_CHANGED." .. keyString, value);
@@ -264,4 +300,38 @@ end
 ---@param func function
 function Settings:onChange(setting, func)
     Events:register(nil, "GL.SETTING_CHANGED." .. setting, func);
+end
+
+--- Whether the given setting currently has a per-character override
+---@param keyString string
+---@return boolean
+function Settings:isPerCharacter(keyString)
+    return hasOverrides and GL:tableGet(Overrides, keyString) ~= nil;
+end
+
+--- Enable or disable a per-character override for the given setting.
+--- Enabling seeds the override with the current effective value so nothing changes visibly.
+---@param keyString string
+---@param enabled boolean
+---@param quiet? boolean Should trigger event?
+---@return nil
+function Settings:setPerCharacter(keyString, enabled, quiet)
+    if (enabled) then
+        if (not Overrides) then
+            Overrides = {};
+            GL:tableSet(self.Active, ("PerCharacter.%s"):format(characterKey()), Overrides);
+        end
+
+        GL:tableSet(Overrides, keyString, self:get(keyString));
+        hasOverrides = true;
+    elseif (Overrides) then
+        GL:tableSet(Overrides, keyString, nil);
+        hasOverrides = next(Overrides) ~= nil;
+    end
+
+    if (not quiet) then
+        local value = self:get(keyString);
+        GL.Events:fire("GL.SETTING_CHANGED." .. keyString, value);
+        GL.Events:fire("GL.SETTING_CHANGED", keyString, value);
+    end
 end
