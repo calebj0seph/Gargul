@@ -24,6 +24,18 @@ local _, GL = ...;
 ---@type Events
 local Events = GL.Events;
 
+--- Chat messages are capped at 255 characters, counting links as the [Name] they show
+local MAX_CHAT_MESSAGE_LENGTH = 255;
+
+--- Messages holding more item links than this don't come through
+local MAX_ITEM_LINKS_PER_MESSAGE = 10;
+
+--- Keeps the gold overlays in front of everything else
+local GOLD_INSIGHT_FRAME_LEVEL = 5000;
+
+--- An item unlocking this soon after we added it means the game bounced it back out
+local ITEM_BOUNCE_WINDOW = .5;
+
 ---@class TradeWindow
 local TradeWindow = {
     _initialized = false,
@@ -183,7 +195,7 @@ function TradeWindow:_init()
         PlayerTradeMoneyInsight:SetPoint("TOP", TradePlayerInputMoneyInset, "TOP");
 
         -- This is to make sure this window is always on top
-        PlayerTradeMoneyInsight:SetFrameLevel(5000);
+        PlayerTradeMoneyInsight:SetFrameLevel(GOLD_INSIGHT_FRAME_LEVEL);
         PlayerTradeMoneyInsight:SetMovable(true);
         PlayerTradeMoneyInsight:StartMoving();
         PlayerTradeMoneyInsight:StopMovingOrSizing();
@@ -209,7 +221,7 @@ function TradeWindow:showTradeConfirmGoldInsight(State)
     self.TradeConfirmGoldInsight:Show();
 
     -- This is to make sure this window is always on tope
-    self.TradeConfirmGoldInsight:SetFrameLevel(5000);
+    self.TradeConfirmGoldInsight:SetFrameLevel(GOLD_INSIGHT_FRAME_LEVEL);
     self.TradeConfirmGoldInsight:SetMovable(true);
     self.TradeConfirmGoldInsight:StartMoving();
     self.TradeConfirmGoldInsight:StopMovingOrSizing();
@@ -375,6 +387,10 @@ function TradeWindow:handleEvents(event, ...)
         GL:cancelTimer("TradeWindowMoneyChangedInterval");
         GL:cancelTimer("TradeWindowAddItemsInterval");
 
+        -- Stop watching the cursor, there's no trade window left to drop gold into
+        Events:unregister("TradeWindowCursorChanged");
+        self.holdingMoney = false;
+
         -- We don't want resetState to trigger since TRADE_CLOSED is fired before TRADE_COMPLETED
         return;
     end
@@ -408,7 +424,7 @@ function TradeWindow:handleEvents(event, ...)
         if (itemGUID
             and type(self.ItemsAdded[itemGUID]) == "table"
         ) then
-            if (GetTime() - self.ItemsAdded[itemGUID].timestamp <= .5) then
+            if (GetTime() - self.ItemsAdded[itemGUID].timestamp <= ITEM_BOUNCE_WINDOW) then
                 tinsert(self.ItemsToAdd, self.ItemsAdded[itemGUID].itemLink or self.ItemsAdded[itemGUID].itemID);
             end
 
@@ -661,486 +677,287 @@ function TradeWindow:updateAnnouncementCheckBox()
     self.AnnouncementCheckBox:SetChecked(self:shouldAnnounce());
 end
 
---- Announce the traded loot or gold in chat
+--- Length of a string the way chat counts it: hyperlink escape codes don't add up
 ---
---- This method is huge, huge, I'm aware. I might have gone a bit overboard, but this at least keeps chat clean~ish
+---@param text string
+---@return number
+local visibleLength = function (text)
+    text = text:gsub("|c%x%x%x%x%x%x%x%x", ""); -- |cffa335ee
+    text = text:gsub("|c%w-:", ""); -- |cnIQ4:
+    text = text:gsub("|H.-|h", "");
+    text = text:gsub("|h", "");
+    text = text:gsub("|r", "");
+
+    return strlen(text);
+end;
+
+--- Combine identical items and sort them so our announcements keep a stable order
+---
+---@param Items table
+---@return table
+local combineItems = function (Items)
+    local minimumQuality = GL.Settings:get("TradeAnnouncements.minimumQualityOfAnnouncedLoot", 0);
+    local Combined, Entries = {}, {};
+
+    for _, Entry in pairs(Items or {}) do
+        local itemID = tonumber(Entry.itemID);
+
+        if (itemID
+            and (Entry.quality or 0) >= minimumQuality
+        ) then
+            local quantity = Entry.quantity and Entry.quantity > 1 and Entry.quantity or 1;
+
+            if (Combined[itemID]) then
+                Combined[itemID].quantity = Combined[itemID].quantity + quantity;
+            else
+                Combined[itemID] = {
+                    itemLink = Entry.itemLink,
+                    quantity = quantity,
+                };
+
+                tinsert(Entries, Combined[itemID]);
+            end
+        end
+    end
+
+    table.sort(Entries, function (a, b)
+        return tostring(GL:getItemNameFromLink(a.itemLink)) < tostring(GL:getItemNameFromLink(b.itemLink));
+    end);
+
+    return Entries;
+end;
+
+--- Announce a single sentence, spread over multiple chat messages when it doesn't fit in one
+---
+--- The first message opens the sentence ("I gave [item], [item]"), the last one closes it
+--- ("... to Player"). Anything in between is a bare list of items.
+---
+---@param Parts table Item links and gold that make up the body of the sentence
+---@param Sentence table open/close/closeAlone callbacks that wrap the body in readable text
+---@param channel string
+---@param recipient? string
+---@return nil
+local announceSentence = function (Parts, Sentence, channel, recipient)
+    if (GL:empty(Parts)) then
+        return;
+    end
+
+    local Messages = {};
+    local message = "";
+    local links = 0;
+
+    -- Gargul prefixes the opening message, which eats into our character budget
+    local prefixLength = strlen(("{rt3} %s : "):format(GL.name));
+    local budget = function ()
+        return MAX_CHAT_MESSAGE_LENGTH - (GL:empty(Messages) and prefixLength or 0);
+    end;
+
+    for _, Part in ipairs(Parts) do
+        local candidate = GL:empty(message) and Sentence.open(Part.text) or ("%s, %s"):format(message, Part.text);
+
+        -- This part no longer fits, wrap up the current message and start a new one
+        if (not GL:empty(message)
+            and (visibleLength(candidate) > budget() or links >= MAX_ITEM_LINKS_PER_MESSAGE)
+        ) then
+            tinsert(Messages, message);
+            message = Part.text;
+            links = 0;
+        else
+            message = candidate;
+        end
+
+        links = links + (Part.isItemLink and 1 or 0);
+    end
+
+    -- Round the sentence off, giving its ending a message of its own when it no longer fits
+    local closed = Sentence.close(message);
+    if (visibleLength(closed) > budget()
+        or (Sentence.closeHoldsItemLink and links >= MAX_ITEM_LINKS_PER_MESSAGE)
+    ) then
+        tinsert(Messages, message);
+        tinsert(Messages, Sentence.closeAlone());
+    else
+        tinsert(Messages, closed);
+    end
+
+    local firstOutput = true;
+    for _, chatMessage in ipairs(Messages) do
+        GL:sendChatMessage(chatMessage, channel, nil, recipient, firstOutput);
+        firstOutput = false;
+    end
+end;
+
+--- Announce the items, gold and enchantments that changed hands in chat
+---
+--- Everything we handed over becomes one sentence, everything we got back another. Both are
+--- built the same way, so an enchant is never dropped just because items went the other way.
 ---
 ---@param Details table
+---@return nil
 function TradeWindow:announceTradeDetails(Details)
     -- Check if the user wants to announce this trade
     if (not Details.announce) then
         return;
     end
 
-    -- Find out on which channel we should post the trade details
-    local channel = "GROUP";
-    local recipient;
+    -- Announce to the group, or whisper our trade partner when we're not in one
+    local channel, recipient = "GROUP", nil;
     if (not GL.User.isInGroup) then
-        channel = "WHISPER";
-        recipient = Details.partner;
+        channel, recipient = "WHISPER", Details.partner;
     end
 
-    local ItemsTradedByMe = {};
-    local iTradedItems = false;
-    local iTradedGold = GL.Settings:get("TradeAnnouncements.goldGiven", true) and Details.myGold > 0;
-    local iEnchantedSomething = false;
-    local goldTradedByMe = GL:copperToMoney(Details.myGold or 0);
+    local partner = Details.partner;
+    local EnchantedByMe = Details.EnchantedByMe or {};
+    local EnchantedByThem = Details.EnchantedByThem or {};
 
-    local ItemsTradedByThem = {};
-    local theyTradedGold = GL.Settings:get("TradeAnnouncements.goldReceived", true) and Details.theirGold > 0;
-    local theyTradedItems = false;
-    local theyEnchantedSomething = false;
-    local goldTradedByThem = GL:copperToMoney(Details.theirGold or 0);
+    local iEnchanted = GL.Settings:get("TradeAnnouncements.enchantmentGiven", true)
+        and not GL:empty(EnchantedByMe.enchantment)
+        and not GL:inTable(GL.Data.Constants.LockedItems, EnchantedByMe.itemID);
+    local theyEnchanted = GL.Settings:get("TradeAnnouncements.enchantmentReceived", true)
+        and not GL:empty(EnchantedByThem.enchantment)
+        and not GL:inTable(GL.Data.Constants.LockedItems, EnchantedByThem.itemID);
 
-    -- Normalize the items we traded (combine stacks etc)
-    if (GL.Settings:get("TradeAnnouncements.itemsGiven", true)) then
-        for _, Entry in pairs(Details.MyItems or {}) do
-            local itemID = tonumber(Entry.itemID);
-            if (itemID
-                and Entry.quality >= GL.Settings:get("TradeAnnouncements.minimumQualityOfAnnouncedLoot", 0)
-            ) then
-                iTradedItems = true;
+    local iGaveGold = GL.Settings:get("TradeAnnouncements.goldGiven", true) and (Details.myGold or 0) > 0;
+    local theyGaveGold = GL.Settings:get("TradeAnnouncements.goldReceived", true) and (Details.theirGold or 0) > 0;
+    local goldGivenByMe = GL:copperToMoney(Details.myGold or 0);
+    local goldGivenByThem = GL:copperToMoney(Details.theirGold or 0);
 
-                local quantity = Entry.quantity > 1 and Entry.quantity or 1;
-                local itemIDString = tostring(Entry.itemID); -- Should already be a string, but need to make sure
+    local MyItems = GL.Settings:get("TradeAnnouncements.itemsGiven", true) and combineItems(Details.MyItems) or {};
+    local TheirItems = GL.Settings:get("TradeAnnouncements.itemsReceived", true) and combineItems(Details.TheirItems) or {};
 
-                -- Check to see if we already have a quantity of the same item available (multiple stacks?)
-                if (ItemsTradedByMe[itemIDString]) then
-                    quantity = quantity + ItemsTradedByMe[itemIDString].quantity;
-                end
-                ItemsTradedByMe[itemIDString] = {
-                    itemLink = Entry.itemLink,
-                    quantity = quantity,
-                };
-            end
+    --- Gold (if any) leads, the items follow
+    local buildParts = function (gold, Items)
+        local Parts = {};
+
+        if (gold) then
+            tinsert(Parts, { text = gold, });
         end
-    end
 
-    -- Normalize the items we received (combine stacks etc)
-    if (GL.Settings:get("TradeAnnouncements.itemsReceived", true)) then
-        for _, Entry in pairs(Details.TheirItems or {}) do
-            local itemID = tonumber(Entry.itemID);
-            if (itemID
-                and Entry.quality >= GL.Settings:get("TradeAnnouncements.minimumQualityOfAnnouncedLoot", 0)
-            ) then
-                theyTradedItems = true;
-
-                local quantity = Entry.quantity > 1 and Entry.quantity or 1;
-                local itemIDString = tostring(Entry.itemID); -- Should already be a string, but need to make sure
-
-                -- Check to see if we already have a quantity of the same item available (multiple stacks?)
-                if (ItemsTradedByThem[itemIDString]) then
-                    quantity = quantity + ItemsTradedByThem[itemIDString].quantity;
-                end
-                ItemsTradedByThem[itemIDString] = {
-                    itemLink = Entry.itemLink,
-                    quantity = quantity,
-                };
-            end
+        for _, Entry in ipairs(Items) do
+            tinsert(Parts, {
+                text = Entry.quantity > 1 and ("%sx%s"):format(Entry.itemLink, Entry.quantity) or Entry.itemLink,
+                isItemLink = true,
+            });
         end
-    end
 
-    -- Include enchantment details
-    local EnchantedByMe = Details.EnchantedByMe;
-    if (GL.Settings:get("TradeAnnouncements.enchantmentGiven", true)
-        and EnchantedByMe.enchantment
-        and not GL:inTable(GL.Data.Constants.LockedItems, EnchantedByMe.itemID)
+        return Parts;
+    end;
+
+    local GivenParts = buildParts(iGaveGold and goldGivenByMe or nil, MyItems);
+    local ReceivedParts = buildParts(theyGaveGold and goldGivenByThem or nil, TheirItems);
+
+    -- Paying for an enchant is by far the most common enchanter trade, keep it to one line
+    if (GL:empty(MyItems)
+        and GL:empty(TheirItems)
     ) then
-        iEnchantedSomething = true;
-    end
-
-    local EnchantedByThem = Details.EnchantedByThem;
-    if (GL.Settings:get("TradeAnnouncements.enchantmentReceived", true)
-        and EnchantedByThem.enchantment
-        and not GL:inTable(GL.Data.Constants.LockedItems, EnchantedByThem.itemID)
-    ) then
-        theyEnchantedSomething = true;
-    end
-
-    local iDidNothing = not iTradedItems and not iTradedGold and not iEnchantedSomething;
-    local theyDidNothing = not theyTradedItems and not theyTradedGold and not theyEnchantedSomething;
-
-    -- The goals:
-    -- I gave 100G 10S 10C, item1, item2 and item3 to Player and also enchanted their item with enchantment
-    -- Player enchanted my Ashjre'thul, Crossbow of Smiting with Stabilized Eternium Scope for 20G
-    -- I enchanted Ashjre'thul, Crossbow of Smiting with Stabilized Eternium Scope for Player and received 20G
-    (function ()
-        --[[
-            THESE ARE ALL THE POSSIBLE SCENARIOS (e.g. we only traded gold, they only enchanted something etc)
-        ]]
-
-        -- We only gave gold (and optionally received an enchantment)
-        if (iTradedGold and not iTradedItems and not iEnchantedSomething) then
-            -- And got nothing in return
-            if (theyDidNothing) then
-                return GL:sendChatMessage((L.CHAT["I gave %s to %s"]):format(goldTradedByMe, Details.partner), channel, nil, recipient);
-            end
-
-            -- We gave them gold for an enchantment (trading gold for gold is not possible, the trade won't be accepted)
-            if (theyEnchantedSomething and not theyTradedItems) then
-                return GL:sendChatMessage((L.CHAT["%s enchanted my %s with %s for %s"]):format(
-                    Details.partner,
-                    EnchantedByThem.itemLink,
-                    EnchantedByThem.enchantment,
-                    goldTradedByMe
-                ), channel, nil, recipient);
-            end
-
-            -- I gave them gold for items and potentially an enchant on top
-            GL:sendChatMessage((L.CHAT["I gave %s to %s"]):format(goldTradedByMe, Details.partner), channel, nil, recipient);
-        end
-
-        -- We only received gold (and optionally enchanted something)
-        if (theyTradedGold and not theyTradedItems and not theyEnchantedSomething) then
-            -- And gave nothing in return
-            if (iDidNothing) then
-                return GL:sendChatMessage((L.CHAT["I received %s from %s"]):format(goldTradedByThem, Details.partner), channel, nil, recipient);
-            end
-
-            -- We gave them an enchantment for their gold (trading gold for gold is not possible, the trade won't be accepted)
-            if (iEnchantedSomething and not iTradedItems) then
-                return GL:sendChatMessage((L.CHAT["I enchanted %s with %s for %s and received %s"]):format(
-                    EnchantedByMe.itemLink,
-                    EnchantedByMe.enchantment,
-                    Details.partner,
-                    goldTradedByThem
-                ), channel, nil, recipient);
-            end
-
-            -- I received gold for items and potentially an enchant on top
-            GL:sendChatMessage((L.CHAT["I received %s from %s"]):format(goldTradedByThem, Details.partner), channel, nil, recipient);
-        end
-
-        -- We enchanted an item, potentially gave gold and got nothing in return
-        if (iEnchantedSomething and not iTradedItems and theyDidNothing) then
-            if (not iTradedGold) then
-                return GL:sendChatMessage((L.CHAT["I enchanted %s with %s for %s"]):format(
-                    EnchantedByMe.itemLink,
-                    EnchantedByMe.enchantment,
-                    Details.partner
-                ), channel, nil, recipient);
-            else
-                return GL:sendChatMessage((L.CHAT["I enchanted %s with %s for %s and gave %s"]):format(
-                    EnchantedByMe.itemLink,
-                    EnchantedByMe.enchantment,
-                    Details.partner,
-                    goldTradedByMe
-                ), channel, nil, recipient);
-            end
-        end
-
-        -- We only received an enchantment, potentially received gold as well and did nothing in return
-        if (theyEnchantedSomething and not theyTradedItems and iDidNothing) then
-            if (not theyTradedGold) then
-                return GL:sendChatMessage((L.CHAT["%s enchanted my %s with %s"]):format(
-                    Details.partner,
-                    EnchantedByThem.itemLink,
-                    EnchantedByThem.enchantment
-                ), channel, nil, recipient);
-            else
-                return GL:sendChatMessage((L.CHAT["%s enchanted my %s with %s and gave me %s"]):format(
-                    Details.partner,
-                    EnchantedByThem.itemLink,
-                    EnchantedByThem.enchantment,
-                    goldTradedByThem
-                ), channel, nil, recipient);
-            end
-        end
-
-        -- We traded enchantments. Very unusual, but hey you never know -_-'
-        if (iEnchantedSomething and not iTradedItems and theyEnchantedSomething and not theyTradedItems) then
-            -- We enchanted each other's items and I gave him gold
-            if (iTradedGold) then
-                return GL:sendChatMessage((L.CHAT["%s enchanted my %s with %s and I enchanted their %s with %s. I also gave him %s"]):format(
-                    Details.partner,
-                    EnchantedByThem.itemLink,
-                    EnchantedByThem.enchantment,
-                    EnchantedByMe.itemLink,
-                    EnchantedByMe.enchantment,
-                    goldTradedByMe
-                ), channel, nil, recipient);
-            end
-
-            -- We enchanted each other's items and he gave me gold
-            if (theyTradedGold) then
-                return GL:sendChatMessage((L.CHAT["%s enchanted my %s with %s and gave me %s. I enchanted their %s with %s"]):format(
-                    Details.partner,
-                    EnchantedByThem.itemLink,
-                    EnchantedByThem.enchantment,
-                    goldTradedByThem,
-                    EnchantedByMe.itemLink,
-                    EnchantedByMe.enchantment
-                ), channel, nil, recipient);
-            end
-
-            -- No money was traded in the process
-            return GL:sendChatMessage((L.CHAT["%s enchanted my %s with %s and I enchanted their %s with %s"]):format(
-                Details.partner,
+        if (iGaveGold and theyEnchanted and not iEnchanted) then
+            GL:sendChatMessage((L.CHAT["%s enchanted my %s with %s for %s"]):format(
+                partner,
                 EnchantedByThem.itemLink,
                 EnchantedByThem.enchantment,
-                EnchantedByMe.itemLink,
-                EnchantedByMe.enchantment
+                goldGivenByMe
             ), channel, nil, recipient);
-        end
 
-        -- We gave items
-        if (iTradedItems) then
-            local message = "";
-            local messageLength = 0;
-            local itemsInMessage = 0;
-            local itemsProcessed = 0; -- Regardless of message length a message may only contain 5 item links!?!
-            local firstOutput = true;
-
-            -- If we gave items AND gold then we start with the gold first
-            if (iTradedGold) then
-                message = (L.CHAT["I gave %s"]):format(goldTradedByMe);
-                messageLength = strlen(message);
-                itemsInMessage = 1;
-            end
-
-            local newMessageLength = messageLength;
-            for _, Entry in pairs(ItemsTradedByMe) do
-                local itemLinkLength = strlen(GL:getItemNameFromLink(Entry.itemLink)) + 2;
-                itemsProcessed = itemsProcessed + 1;
-
-                (function ()
-                    if (Entry.quantity <= 1) then
-                        if (messageLength < 1) then
-                            message = (L.CHAT["I gave %s"]):format(Entry.itemLink);
-                            messageLength = messageLength + strlen(L.CHAT["I gave %s"]) - 2 + itemLinkLength; -- -2 for the %s in TRADE_GAVE
-
-                            return;
-                        else
-                            newMessageLength = messageLength + 1 + itemLinkLength; -- 1 refers to the space between items
-
-                            -- Adding this item to the existing message would make the message too large for chat (>255)
-                            -- We need to dump the existing message first before we can continue
-                            if (newMessageLength >= 255 or itemsProcessed > 5) then
-                                GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                                firstOutput = false;
-                                message = Entry.itemLink;
-                                messageLength = itemLinkLength;
-                                itemsProcessed = 1;
-                            else
-                                message = ("%s %s"):format(message, Entry.itemLink);
-                                messageLength = newMessageLength;
-                            end
-                        end
-                    else
-                        if (messageLength < 1) then
-                            message = (L.CHAT["I gave %sx%s"]):format(Entry.itemLink, Entry.quantity);
-                            messageLength = messageLength + strlen(message) + itemLinkLength - strlen(Entry.itemLink);
-
-                            return;
-                        else
-                            newMessageLength = messageLength + strlen(", x") + itemLinkLength + strlen(Entry.quantity);
-
-                            -- Adding this item to the existing message would make the message too large for chat (>255)
-                            -- We need to dump the existing message first before we can continue
-                            if (newMessageLength >= 255 or itemsProcessed > 5) then
-                                GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                                firstOutput = false;
-                                message = ("%sx%s"):format(Entry.itemLink, Entry.quantity);
-                                messageLength = itemLinkLength + 1 + strlen(Entry.quantity); -- +1 for the x
-                                itemsProcessed = 1;
-                            else
-                                message = ("%s, %sx%s"):format(message, Entry.itemLink, Entry.quantity);
-                                messageLength = newMessageLength;
-                            end
-                        end
-                    end
-                end)();
-            end
-
-            -- There's still some data left that needs to be announced
-            -- The goal: I gave 100G 10S 10C, item1, item2 and item3 to Player and also enchanted their item with enchantment
-            if (messageLength) then
-                -- We enchanted something so we need to take that into account
-                if (iEnchantedSomething) then
-                    local itemLinkLength = strlen(GL:getItemNameFromLink(EnchantedByMe.itemLink)) + 2;
-                    newMessageLength = messageLength + strlen(L.CHAT["to %s and enchanted their %s with %s"]) - 6 -- 6 for 3x%s
-                        + strlen(Details.partner)
-                        + itemLinkLength
-                        + strlen(EnchantedByMe.enchantment);
-
-                    if (newMessageLength >= 255 or itemsProcessed >= 5) then -- The enchant also includes an item link
-                        GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                        firstOutput = false;
-
-                        message = (L.CHAT["to %s and enchanted their %s with %s"]):format(
-                            Details.partner,
-                            EnchantedByMe.itemLink,
-                            EnchantedByMe.enchantment
-                        );
-                        GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                    else
-                        message = (L.CHAT["%s to %s and enchanted their %s with %s"]):format(
-                            message,
-                            Details.partner,
-                            EnchantedByMe.itemLink,
-                            EnchantedByMe.enchantment
-                        );
-
-                        GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                    end
-                else
-                    newMessageLength = messageLength + strlen(L.CHAT["to %s"]) - 1 + strlen(Details.partner);
-
-                    if (newMessageLength >= 255) then
-                        GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                        firstOutput = false;
-                        message = (L.CHAT["to %s"]):format(Details.partner);
-                        GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                    else
-                        message = (L.CHAT["%s to %s"]):format(message, Details.partner);
-                        GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                    end
-                end
-            else -- There's nothing left to announce. This happens VERY rarely
-                if (iEnchantedSomething) then
-                    message = (L.CHAT["to %s and enchanted their %s with %s"]):format(
-                        Details.partner,
-                        EnchantedByMe.itemLink,
-                        EnchantedByMe.enchantment
-                    );
-                    GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                else
-                    message = (L.CHAT["%s to %s"]):format(message, Details.partner);
-                    GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                end
-            end
-        end
-
-        -- We didn't get anything back, no need to continue
-        if (not theyTradedItems) then
             return;
         end
 
-        -- They gave us items (totally not DRY I know, but this gives us more control
-        local message = "";
-        local messageLength = 0;
-        local itemsInMessage = 0;
-        local itemsProcessed = 0; -- Regardless of message length a message may only contain 5 item links!?!
-        local firstOutput = true;
+        if (theyGaveGold and iEnchanted and not theyEnchanted) then
+            GL:sendChatMessage((L.CHAT["I enchanted %s with %s for %s and received %s"]):format(
+                EnchantedByMe.itemLink,
+                EnchantedByMe.enchantment,
+                partner,
+                goldGivenByThem
+            ), channel, nil, recipient);
 
-        -- If we received items AND gold then we start with the gold first
-        if (theyTradedGold) then
-            message = (L.CHAT["I received %s"]):format(goldTradedByThem);
-            messageLength = strlen(message);
-            itemsInMessage = 1;
+            return;
         end
+    end
 
-        local newMessageLength = messageLength;
-        for _, Entry in pairs(ItemsTradedByThem) do
-            local itemLinkLength = strlen(GL:getItemNameFromLink(Entry.itemLink)) + 2;
-            itemsProcessed = itemsProcessed + 1;
+    -- Everything that went their way
+    if (not GL:empty(GivenParts)) then
+        announceSentence(GivenParts, {
+            open = function (body)
+                return (L.CHAT["I gave %s"]):format(body);
+            end,
 
-            (function ()
-                if (Entry.quantity <= 1) then
-                    if (messageLength < 1) then
-                        message = (L.CHAT["I received %s"]):format(Entry.itemLink);
-                        messageLength = messageLength + strlen(L.CHAT["I received %s"]) -2 + itemLinkLength;
-
-                        return;
-                    else
-                        newMessageLength = messageLength + strlen(", ") + itemLinkLength;
-
-                        -- Adding this item to the existing message would make the message too large for chat (>255)
-                        -- We need to dump the existing message first before we can continue
-                        if (newMessageLength >= 255 or itemsProcessed > 5) then
-                            GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                            firstOutput = false;
-                            message = Entry.itemLink;
-                            messageLength = itemLinkLength;
-                            itemsProcessed = 1;
-                        else
-                            message = ("%s, %s"):format(message, Entry.itemLink);
-                            messageLength = newMessageLength;
-                        end
-                    end
-                else
-                    if (messageLength < 1) then
-                        message = (L.CHAT["I received %sx%s"]):format(Entry.itemLink, Entry.quantity);
-                        messageLength = messageLength + strlen(message) + itemLinkLength - strlen(Entry.itemLink);
-
-                        return;
-                    else
-                        newMessageLength = messageLength + strlen(", x") + itemLinkLength + strlen(Entry.quantity);
-
-                        -- Adding this item to the existing message would make the message too large for chat (>255)
-                        -- We need to dump the existing message first before we can continue
-                        if (newMessageLength >= 255 or itemsProcessed > 5) then
-                            GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                            firstOutput = false;
-                            message = Entry.itemLink;
-                            messageLength = itemLinkLength;
-                            itemsProcessed = 1;
-                        else
-                            message = ("%s, %sx%s"):format(message, Entry.itemLink, Entry.quantity);
-                            messageLength = newMessageLength;
-                        end
-                    end
+            close = function (body)
+                if (not iEnchanted) then
+                    return (L.CHAT["%s to %s"]):format(body, partner);
                 end
-            end)();
-        end
 
-        -- There's still some data left that needs to be announced
-        -- The goal: I gave 100G 10S 10C, item1, item2 and item3 to Player and also enchanted their item with enchantment
-        if (messageLength) then
-            -- We got something enchanted so we need to take that into account
-            if (theyEnchantedSomething) then
-                local itemLinkLength = strlen(GL:getItemNameFromLink(EnchantedByThem.itemLink)) + 2;
+                return (L.CHAT["%s to %s and enchanted their %s with %s"]):format(
+                    body,
+                    partner,
+                    EnchantedByMe.itemLink,
+                    EnchantedByMe.enchantment
+                );
+            end,
 
-                newMessageLength = messageLength + strlen(" from  and got my  enchanted with ")
-                    + strlen(Details.partner)
-                    + itemLinkLength
-                    + strlen(EnchantedByThem.enchantment);
-
-                if (newMessageLength >= 255 or itemsProcessed >= 5) then -- The enchant also includes an item link
-                    GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                    firstOutput = false;
-
-                    message = (L.CHAT["from %s and got my %s enchanted with %s"]):format(
-                        Details.partner,
-                        EnchantedByThem.itemLink,
-                        EnchantedByThem.enchantment
-                    );
-                    GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                else
-                    message = (L.CHAT["%s from %s and got my %s enchanted with %s"]):format(
-                        message,
-                        Details.partner,
-                        EnchantedByThem.itemLink,
-                        EnchantedByThem.enchantment
-                    );
-
-                    GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
+            closeAlone = function ()
+                if (not iEnchanted) then
+                    return (L.CHAT["to %s"]):format(partner);
                 end
-            else
-                newMessageLength = messageLength + strlen(L.CHAT["from %s"]) - 1 + strlen(Details.partner);
 
-                if (newMessageLength >= 255) then
-                    GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                    firstOutput = false;
-                    message = (L.CHAT["from %s"]):format(Details.partner);
-                    GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-                else
-                    message = (L.CHAT["%s from %s"]):format(message, Details.partner);
-                    GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
+                return (L.CHAT["to %s and enchanted their %s with %s"]):format(
+                    partner,
+                    EnchantedByMe.itemLink,
+                    EnchantedByMe.enchantment
+                );
+            end,
+
+            closeHoldsItemLink = iEnchanted,
+        }, channel, recipient);
+
+    -- We gave nothing but did enchant something for them
+    elseif (iEnchanted) then
+        GL:sendChatMessage((L.CHAT["I enchanted %s with %s for %s"]):format(
+            EnchantedByMe.itemLink,
+            EnchantedByMe.enchantment,
+            partner
+        ), channel, nil, recipient);
+    end
+
+    -- Everything that came our way
+    if (not GL:empty(ReceivedParts)) then
+        announceSentence(ReceivedParts, {
+            open = function (body)
+                return (L.CHAT["I received %s"]):format(body);
+            end,
+
+            close = function (body)
+                if (not theyEnchanted) then
+                    return (L.CHAT["%s from %s"]):format(body, partner);
                 end
-            end
-        else -- There's nothing left to announce. This happens VERY rarely
-            if (theyEnchantedSomething) then
-                message = (L.CHAT["from %s and got my %s enchanted with %s"]):format(
-                    Details.partner,
+
+                return (L.CHAT["%s from %s and got my %s enchanted with %s"]):format(
+                    body,
+                    partner,
                     EnchantedByThem.itemLink,
                     EnchantedByThem.enchantment
                 );
-                GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-            else
-                message = (L.CHAT["%s from %s"]):format(message, Details.partner);
-                GL:sendChatMessage(message, channel, nil, recipient, firstOutput);
-            end
-        end
-    end)();
+            end,
+
+            closeAlone = function ()
+                if (not theyEnchanted) then
+                    return (L.CHAT["from %s"]):format(partner);
+                end
+
+                return (L.CHAT["from %s and got my %s enchanted with %s"]):format(
+                    partner,
+                    EnchantedByThem.itemLink,
+                    EnchantedByThem.enchantment
+                );
+            end,
+
+            closeHoldsItemLink = theyEnchanted,
+        }, channel, recipient);
+
+    -- We got nothing but they did enchant something of ours
+    elseif (theyEnchanted) then
+        GL:sendChatMessage((L.CHAT["%s enchanted my %s with %s"]):format(
+            partner,
+            EnchantedByThem.itemLink,
+            EnchantedByThem.enchantment
+        ), channel, nil, recipient);
+    end
 end

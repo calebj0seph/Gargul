@@ -248,7 +248,7 @@ end
 /script _G.Gargul.Test.TradeState:iEnchantedForGold()
 ]]
 function Test.TradeState:iEnchantedForGold(feeInCopper)
-    GL:success("Running Test.TradeState:iEnchantedForFee() ...");
+    GL:success("Running Test.TradeState:iEnchantedForGold() ...");
 
     self:_init(function ()
         local State = self:defaultState();
@@ -267,7 +267,7 @@ end
 /script _G.Gargul.Test.TradeState:theyEnchantedForGold()
 ]]
 function Test.TradeState:theyEnchantedForGold(feeInCopper)
-    GL:success("Running Test.TradeState:theyEnchantedForFee() ...");
+    GL:success("Running Test.TradeState:theyEnchantedForGold() ...");
 
     self:_init(function ()
         local State = self:defaultState();
@@ -315,6 +315,78 @@ function Test.TradeState:theyEnchantedTheyGaveGold(feeInCopper)
         State.EnchantedByMe = {};
         State.theirGold = feeInCopper or State.myGold;
         State.myGold = 0;
+
+        GL.TradeWindow:announceTradeDetails(State);
+    end);
+end
+
+--[[ Show what happens if you enchant an item using mats you received in the same trade
+/script _G.Gargul.Test.TradeState:iEnchantedTheyTradedItems()
+]]
+function Test.TradeState:iEnchantedTheyTradedItems()
+    GL:success("Running Test.TradeState:iEnchantedTheyTradedItems() ...");
+
+    self:_init(function ()
+        local State = self:defaultState();
+
+        State.MyItems = {};
+        State.EnchantedByThem = {};
+        State.myGold = 0;
+        State.theirGold = 0;
+
+        GL.TradeWindow:announceTradeDetails(State);
+    end);
+end
+
+--[[ Show what happens if you hand over the mats for an enchant they do for you
+/script _G.Gargul.Test.TradeState:theyEnchantedITradedItems()
+]]
+function Test.TradeState:theyEnchantedITradedItems()
+    GL:success("Running Test.TradeState:theyEnchantedITradedItems() ...");
+
+    self:_init(function ()
+        local State = self:defaultState();
+
+        State.TheirItems = {};
+        State.EnchantedByMe = {};
+        State.myGold = 0;
+        State.theirGold = 0;
+
+        GL.TradeWindow:announceTradeDetails(State);
+    end);
+end
+
+--[[ Show what happens if you give items and enchant something in the same trade
+/script _G.Gargul.Test.TradeState:iTradedItemsAndEnchanted()
+]]
+function Test.TradeState:iTradedItemsAndEnchanted()
+    GL:success("Running Test.TradeState:iTradedItemsAndEnchanted() ...");
+
+    self:_init(function ()
+        local State = self:defaultState();
+
+        State.TheirItems = {};
+        State.EnchantedByThem = {};
+        State.myGold = 0;
+        State.theirGold = 0;
+
+        GL.TradeWindow:announceTradeDetails(State);
+    end);
+end
+
+--[[ Show what happens if they give items and enchant something in the same trade
+/script _G.Gargul.Test.TradeState:theyTradedItemsAndEnchanted()
+]]
+function Test.TradeState:theyTradedItemsAndEnchanted()
+    GL:success("Running Test.TradeState:theyTradedItemsAndEnchanted() ...");
+
+    self:_init(function ()
+        local State = self:defaultState();
+
+        State.MyItems = {};
+        State.EnchantedByMe = {};
+        State.myGold = 0;
+        State.theirGold = 0;
 
         GL.TradeWindow:announceTradeDetails(State);
     end);
@@ -448,29 +520,56 @@ function Test.TradeState:theyGaveGoldAndItems()
     end);
 end
 
---[[ Test all TradeState methods. Warning: this will get your chat messy!
+--[[ Run every trade scenario, one after the other. Warning: this will get your chat messy!
 /script _G.Gargul.Test.TradeState:all()
+/script _G.Gargul.Test.TradeState:all(5)
 ]]
-function Test.TradeState:all()
-    GL:success("Running Test.TradeState:all() ...");
+---@param secondsBetweenScenarios? number Bump this if the server starts swallowing messages
+---@return nil
+function Test.TradeState:all(secondsBetweenScenarios)
+    secondsBetweenScenarios = secondsBetweenScenarios == nil and 3 or secondsBetweenScenarios;
 
-    local timeout = .8;
-    for name, Entry in pairs(Test.TradeState) do
-        if (type(Entry) == "function"
-            and name ~= "all"
-            and name ~= "_init"
-        ) then
-            GL.Ace:ScheduleTimer(function ()
-                Entry(Test.TradeState);
-            end, timeout);
-
-            timeout = timeout * 1.3;
+    -- Load the items up front, every scenario needs them to build a trade state
+    self:_init(function ()
+        if (GL:empty(Test.TradeState.Items)) then
+            GL:error("Items are still loading, try again in a second");
+            return;
         end
-    end
 
-    GL.Ace:ScheduleTimer(function ()
-        GL:success("Done with Test.TradeState:all()!");
-    end, timeout + 1);
+        -- Everything else on TradeState is a scenario
+        local Skip = {
+            _init = true,
+            all = true,
+            defaultState = true,
+        };
+
+        local Names = {};
+        for name, Entry in pairs(Test.TradeState) do
+            if (type(Entry) == "function"
+                and not Skip[name]
+            ) then
+                tinsert(Names, name);
+            end
+        end
+
+        -- Always run in the same order so two runs can be compared
+        table.sort(Names);
+
+        GL:success(("Running %s trade scenarios, %s seconds apart ..."):format(#Names, secondsBetweenScenarios));
+
+        local delay = 0;
+        for _, name in ipairs(Names) do
+            delay = delay + secondsBetweenScenarios;
+
+            GL.Ace:ScheduleTimer(function ()
+                Test.TradeState[name](Test.TradeState);
+            end, delay);
+        end
+
+        GL.Ace:ScheduleTimer(function ()
+            GL:success("Done with Test.TradeState:all()!");
+        end, delay + secondsBetweenScenarios);
+    end);
 end
 
 --[[ Show who's eligible to get an item by it's ID (if any)
@@ -993,6 +1092,119 @@ function Test.ItemLinks:roundTrip()
             GL:xd(("[ItemLinks] TIMEOUT: only %d/%d resolved."):format(completed, total));
         end
     end);
+end
+
+--- Find out how many item links actually survive a single SendChatMessage
+---
+--- Posts increasingly long messages, each opening with its index and byte count and ending
+--- in [END]. Any message that reaches chat without its [END] marker was truncated.
+---
+---@param maxLinks? number
+---@return nil
+---@test /script _G.Gargul.Test.ItemLinks:chatLimit()
+function Test.ItemLinks:chatLimit(maxLinks)
+    maxLinks = maxLinks or 12;
+
+    if (not GL.User.isInGroup) then
+        GL:error("Join a group first, this test posts to party/raid chat");
+        return;
+    end
+
+    local chatType = GL.User.isInRaid and "RAID" or "PARTY";
+    local delay = 0;
+
+    for links = 1, maxLinks do
+        local Links = {};
+
+        for i = 1, links do
+            tinsert(Links, self.Links[(i - 1) % #self.Links + 1]);
+        end
+
+        local message = ("#%s %s [END]"):format(links, table.concat(Links, " "));
+        delay = delay + 1.5;
+
+        GL.Ace:ScheduleTimer(function ()
+            GL:xd(("[chatLimit] #%s: %s links, %s bytes"):format(links, links, strlen(message)));
+
+            SendChatMessage(message, chatType);
+        end, delay);
+    end
+end
+
+--- Work out what actually caps a chat message: the number of item links, or its length
+---
+--- The ladder above can't tell those apart, both grow at the same time. These four can.
+--- Read the results in chat, every message should end in [END]:
+--- - B arrives  -> the cap counts item links and length doesn't matter
+--- - B is gone  -> the cap counts characters, with links measured by their visible [Name]
+--- - C arrives  -> plain text isn't capped at 255 either
+---
+---@return nil
+---@test /script _G.Gargul.Test.ItemLinks:chatLimitCause()
+function Test.ItemLinks:chatLimitCause()
+    if (not GL.User.isInGroup) then
+        GL:error("Join a group first, this test posts to party/raid chat");
+        return;
+    end
+
+    local chatType = GL.User.isInRaid and "RAID" or "PARTY";
+    local visibleLength = function (link)
+        return strlen(GL:getItemNameFromLink(link) or "") + 2; -- +2 for the brackets
+    end;
+
+    -- Sort our links by the length of the name they show in chat
+    local Sorted = {};
+    for _, link in pairs(self.Links) do
+        tinsert(Sorted, link);
+    end
+
+    table.sort(Sorted, function (a, b)
+        return visibleLength(a) > visibleLength(b);
+    end);
+
+    local Cases = {};
+    local addCase = function (label, Links, padding)
+        local body = padding or table.concat(Links, " ");
+        local visible = strlen(("#%s  [END]"):format(label)) + strlen(padding or "");
+
+        for _, link in pairs(Links) do
+            visible = visible + visibleLength(link) + 1; -- +1 for the space between links
+        end
+
+        tinsert(Cases, {
+            label = label,
+            message = ("#%s %s [END]"):format(label, body),
+            links = #Links,
+            visible = visible,
+        });
+    end;
+
+    local Longest, Shortest = {}, {};
+    for i = 1, 10 do
+        tinsert(Longest, Sorted[i]);
+        tinsert(Shortest, Sorted[#Sorted + 1 - i]);
+    end
+
+    addCase("A", Shortest);                              -- 10 links, short names: known good
+    addCase("B", Longest);                               -- 10 links, long names: way past 255 visible
+    addCase("C", {}, strrep("plain text padding ", 21)); -- no links, ~400 characters
+    addCase("D", {}, strrep("plain text padding ", 12)); -- no links, ~240 characters
+
+    local delay = 0;
+    for _, Case in ipairs(Cases) do
+        delay = delay + 1.5;
+
+        GL.Ace:ScheduleTimer(function ()
+            GL:xd(("[chatLimitCause] #%s: %s links, %s visible, %s bytes"):format(
+                Case.label,
+                Case.links,
+                Case.visible,
+                strlen(Case.message)
+            ));
+
+            SendChatMessage(Case.message, chatType);
+        end, delay);
+    end
 end
 
 --- Populate the active GDKP session with 45 fake players and 90 sales so the
