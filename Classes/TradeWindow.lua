@@ -36,34 +36,70 @@ local GOLD_INSIGHT_FRAME_LEVEL = 5000;
 --- An item unlocking this soon after we added it means the game bounced it back out
 local ITEM_BOUNCE_WINDOW = .5;
 
+--- Timer and listener names. Spelling one of these wrong silently skips a cancel, hence the constants
+local ADD_ITEMS_TIMER_ID = "TradeWindowAddItemsInterval";
+local CURSOR_CHANGED_LISTENER_ID = "TradeWindowCursorChanged";
+local HIDE_GOLD_TIMER_ID = "TradeWindowHideGoldToBeTradedTimer";
+local MONEY_CHANGED_TIMER_ID = "TradeWindowMoneyChangedInterval";
+local TRADE_SHOW_LISTENER_ID = "TradeWindowTradeShowCallbackListener";
+
+--- Strip the decoration retail hangs off the trade partner's name, ie "Name (*)"
+---
+---@param name? string
+---@return string
+local sanitizePartnerName = function (name)
+    if (not name) then
+        return "";
+    end
+
+    name = name:gsub("%-", "");
+    name = name:gsub("%*", "");
+    name = name:gsub("%(", "");
+
+    return (name:gsub("%)", ""));
+end;
+
+--- The shape of a trade state, used on load and whenever we reset between trades
+---
+---@return table
+local newState = function ()
+    return {
+        announce = false,
+        EnchantedByMe = {},
+        EnchantedByThem = {},
+        myGold = 0,
+        MyItems = {},
+        partner = "",
+        theirGold = 0,
+        TheirItems = {},
+    };
+end;
+
 ---@class TradeWindow
 local TradeWindow = {
     _initialized = false,
-    hideGoldToBeTradedTimerIdentifier = "TradeWindowHideGoldToBeTradedTimer",
     manuallyChangedAnnounceCheckbox = false,
-
-    ---@type Frame?
-    GoldInsightFrame = nil,
 
     ---@type CheckButton?
     AnnouncementCheckBox = nil,
 
+    ---@type Frame?
+    PlayerTradeMoneyInsight = nil,
+
+    ---@type Frame?
+    TradeConfirmGoldInsight = nil,
+
     ItemsToAdd = {},
     ItemsAdded = {},
-    State = {
-        partner = "",
-        MyItems = {},
-        myGold = 0,
-        TheirItems = {},
-        theirGold = 0,
-        itemLink = nil,
-        itemID = nil,
-    }
+    State = newState(),
 };
 
 ---@type TradeWindow
 GL.TradeWindow = TradeWindow;
 
+--- Build one of the dark red overlays we use to spell out how much gold is on the line
+---
+---@return Frame
 local createPlayerTradeMoneyFrame = function ()
     ---@type Frame
     local PlayerTradeMoneyFrame = CreateFrame("Frame", nil, TradeFrame, "BackdropTemplate");
@@ -75,12 +111,12 @@ local createPlayerTradeMoneyFrame = function ()
         PlayerTradeMoneyFrame:Hide();
     end);
 
-    PlayerTradeMoneyFrame:SetBackdrop{
+    PlayerTradeMoneyFrame:SetBackdrop({
         bgFile = "Interface/Buttons/WHITE8x8",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
         edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4, }
-    };
+        insets = { left = 4, right = 4, top = 4, bottom = 4, },
+    });
     -- Red border + dark background
     PlayerTradeMoneyFrame:SetBackdropColor(0, 0, 0, 1);
     PlayerTradeMoneyFrame:SetBackdropBorderColor(1, 0, 0, 1);
@@ -92,11 +128,16 @@ local createPlayerTradeMoneyFrame = function ()
     return PlayerTradeMoneyFrame;
 end;
 
+--- Add the "Announce Trade" checkbox and its settings cogwheel to the trade window
+---
+---@return nil
 local createAnnounceTradeCheckbox = function ()
     local self = TradeWindow;
 
     local CheckBox = CreateFrame("CheckButton", "GargulAnnounceTradeDetails", TradeFrame, "UICheckButtonTemplate");
-    GargulAnnounceTradeDetailsText:SetText(L["Announce Trade"]);
+
+    -- UICheckButtonTemplate names its label $parentText, it's a FontString and not the checkbox itself
+    _G.GargulAnnounceTradeDetailsText:SetText(L["Announce Trade"]);
     CheckBox:SetChecked(self:shouldAnnounce());
     CheckBox:SetPoint("BOTTOMLEFT", "TradeFrame", "BOTTOMLEFT", 8, 6);
     CheckBox:SetWidth(20);
@@ -108,7 +149,7 @@ local createAnnounceTradeCheckbox = function ()
     self.AnnouncementCheckBox = CheckBox;
 
     -- Create the cogwheel that links to the announcement settings
-    local Cogwheel = CreateFrame("Button", "TradeWindowAnnouncementBox", TradeFrame, Frame);
+    local Cogwheel = CreateFrame("Button", "TradeWindowAnnouncementBox", TradeFrame, nil);
     Cogwheel:Show();
     Cogwheel:SetClipsChildren(true);
     Cogwheel:SetSize(13, 13);
@@ -116,8 +157,7 @@ local createAnnounceTradeCheckbox = function ()
 
     local CogwheelTexture = Cogwheel:CreateTexture();
     CogwheelTexture:SetPoint("BOTTOMRIGHT", 0, 0);
-    CogwheelTexture:SetSize(16,16);
-    CogwheelTexture:SetTexture("interface/cursor/interact");
+    CogwheelTexture:SetSize(16, 16);
     CogwheelTexture:SetTexture("interface/cursor/unableinteract");
     Cogwheel.texture = CogwheelTexture;
 
@@ -136,6 +176,8 @@ local createAnnounceTradeCheckbox = function ()
 end;
 
 --- Register all events needed to keep track of the trade window state
+---
+---@return nil
 function TradeWindow:_init()
     -- No need to initialize this class twice
     if (self._initialized) then
@@ -208,19 +250,20 @@ function TradeWindow:_init()
 end
 
 ---@param State table
+---@return nil
 function TradeWindow:showTradeConfirmGoldInsight(State)
     if (not State.myGold or State.myGold < 1) then
         return;
     end
 
-    GL:after(4, self.hideGoldToBeTradedTimerIdentifier, function ()
+    GL:after(4, HIDE_GOLD_TIMER_ID, function ()
         self:hideTradeConfirmGoldInsight();
     end);
 
     self.TradeConfirmGoldInsight.text:SetText(L["You are giving: %s to %s"]:format(GL:copperToMoneyTexture(State.myGold), GL:formatPlayerName(State.partner, { colorize = true, })));
     self.TradeConfirmGoldInsight:Show();
 
-    -- This is to make sure this window is always on tope
+    -- This is to make sure this window is always on top
     self.TradeConfirmGoldInsight:SetFrameLevel(GOLD_INSIGHT_FRAME_LEVEL);
     self.TradeConfirmGoldInsight:SetMovable(true);
     self.TradeConfirmGoldInsight:StartMoving();
@@ -228,8 +271,9 @@ function TradeWindow:showTradeConfirmGoldInsight(State)
     self.TradeConfirmGoldInsight:SetMovable(false);
 end
 
+---@return nil
 function TradeWindow:hideTradeConfirmGoldInsight()
-    GL:cancelTimer(self.hideGoldToBeTradedTimerIdentifier);
+    GL:cancelTimer(HIDE_GOLD_TIMER_ID);
     self.TradeConfirmGoldInsight.text:SetText("");
     self.TradeConfirmGoldInsight:Hide();
 end
@@ -237,18 +281,19 @@ end
 --- Attempt to open a trade window with a given player name
 ---
 ---@param playerName string
----@param callback function
----@param allwaysExecuteCallback boolean
-function TradeWindow:open(playerName, callback, allwaysExecuteCallback)
+---@param callback? function
+---@param alwaysExecuteCallback? boolean
+---@return nil
+function TradeWindow:open(playerName, callback, alwaysExecuteCallback)
     playerName = GL:formatPlayerName(playerName);
-    allwaysExecuteCallback = GL:toboolean(allwaysExecuteCallback);
+    alwaysExecuteCallback = GL:toboolean(alwaysExecuteCallback);
 
     -- We're already trading with someone
     if (TradeFrame:IsShown()) then
         local playerNameMatches = GL:iEquals(self.State.partner, playerName) or GL:iEquals(GL:stripRealm(self.State.partner), playerName);
 
         if (type(callback) == "function"
-            and (allwaysExecuteCallback or playerNameMatches)
+            and (alwaysExecuteCallback or playerNameMatches)
         ) then
             callback(playerNameMatches);
         end
@@ -257,21 +302,21 @@ function TradeWindow:open(playerName, callback, allwaysExecuteCallback)
     end
 
     -- Make sure the callback runs when a trade window is opened
-    -- with our desired target or allwaysExecuteCallback is true
+    -- with our desired target or alwaysExecuteCallback is true
     if (type(callback) == "function") then
         -- Even with jitter/lag opening a trade window should never take longer than a second
         -- If it does take longer however then we delete the eventlistener manually
         local timerID = GL.Ace:ScheduleTimer(function ()
-            GL.Events:unregister("TradeWindowTradeShowCallbackListener");
+            GL.Events:unregister(TRADE_SHOW_LISTENER_ID);
 
-            if (allwaysExecuteCallback) then
+            if (alwaysExecuteCallback) then
                 callback(false);
             end
         end, 1);
 
-        GL.Events:register("TradeWindowTradeShowCallbackListener", "GL.TRADE_SHOW", function ()
+        GL.Events:register(TRADE_SHOW_LISTENER_ID, "GL.TRADE_SHOW", function ()
             -- Remove our trade window show event listener, we no longer need it
-            GL.Events:unregister("TradeWindowTradeShowCallbackListener");
+            GL.Events:unregister(TRADE_SHOW_LISTENER_ID);
 
             -- We can cancel our timer now
             GL.Ace:CancelTimer(timerID);
@@ -279,7 +324,7 @@ function TradeWindow:open(playerName, callback, allwaysExecuteCallback)
             -- Perform the callback
             local playerNameMatches = GL:iEquals(self.State.partner, playerName) or GL:iEquals(GL:stripRealm(self.State.partner), playerName);
 
-            if (allwaysExecuteCallback
+            if (alwaysExecuteCallback
                 or (TradeFrame:IsShown()
                     and playerNameMatches
                 )
@@ -294,6 +339,7 @@ function TradeWindow:open(playerName, callback, allwaysExecuteCallback)
 end
 
 ---@param copper number
+---@return nil
 function TradeWindow:showGoldOverlay(copper)
     local Overlay = self.PlayerTradeMoneyInsight;
     GL.Interface:addTooltip(Overlay, L["%s will be traded to %s. Click to add gold manually instead"]:format(GL:copperToMoneyTexture(copper), GL:formatPlayerName(self.State.partner, { colorize = true, })));
@@ -301,6 +347,7 @@ function TradeWindow:showGoldOverlay(copper)
     Overlay:Show();
 end
 
+---@return nil
 function TradeWindow:hideGoldOverlay()
     self.PlayerTradeMoneyInsight:Hide();
 end
@@ -308,7 +355,8 @@ end
 --- Handle trade-related events
 ---
 ---@param event string
----@param message string
+---@param ... any
+---@return nil
 function TradeWindow:handleEvents(event, ...)
     -- Incoming UI_INFO_MESSAGE
     if (event == "UI_INFO_MESSAGE") then
@@ -333,16 +381,16 @@ function TradeWindow:handleEvents(event, ...)
         self:updateAnnouncementCheckBox();
 
         -- Make sure to cancel any lingering timers
-        GL:cancelTimer("TradeWindowMoneyChangedInterval");
-        GL:cancelTimer("TradeWindowAddItemsInterval");
+        GL:cancelTimer(MONEY_CHANGED_TIMER_ID);
+        GL:cancelTimer(ADD_ITEMS_TIMER_ID);
 
         -- Periodically add items to the trade window
         -- We don't do this instantly because that can bug out the UI
-        GL:interval(0, "TradeWindowAddItemsInterval", function ()
+        GL:interval(0, ADD_ITEMS_TIMER_ID, function ()
             self:processItemsToAdd();
         end);
 
-        GL:interval(.2, "TradeWindowMoneyChangedInterval", function ()
+        GL:interval(.2, MONEY_CHANGED_TIMER_ID, function ()
             local myGold = GetPlayerTradeMoney();
             local theirGold = GetTargetTradeMoney();
             if (self.State.myGold ~= myGold
@@ -357,18 +405,15 @@ function TradeWindow:handleEvents(event, ...)
 
         -- Start listening for gold dropped via cursor
         local moneyBefore = 0;
-        Events:register("TradeWindowCursorChanged", "CURSOR_CHANGED", function (_, _, newCursorType, oldCursorType)
+        Events:register(CURSOR_CHANGED_LISTENER_ID, "CURSOR_CHANGED", function (_, _, newCursorType, oldCursorType)
             -- Player picked up gold
             if (oldCursorType == Enum.UICursorType.Default and newCursorType == Enum.UICursorType.Money) then
                 moneyBefore = GetPlayerTradeMoney();
-                self.holdingMoney = true;
                 return;
             end
 
             -- Player dropped gold
             if (oldCursorType == Enum.UICursorType.Money and newCursorType == Enum.UICursorType.Default) then
-                self.holdingMoney = false;
-
                 GL:after(.1, nil, function ()
                     local copper = GetPlayerTradeMoney();
                     if (copper and copper > 0 and copper ~= moneyBefore) then
@@ -384,12 +429,11 @@ function TradeWindow:handleEvents(event, ...)
         self.ItemsToAdd, self.ItemsAdded = {}, {};
 
         -- Make sure to cancel any lingering timers
-        GL:cancelTimer("TradeWindowMoneyChangedInterval");
-        GL:cancelTimer("TradeWindowAddItemsInterval");
+        GL:cancelTimer(MONEY_CHANGED_TIMER_ID);
+        GL:cancelTimer(ADD_ITEMS_TIMER_ID);
 
         -- Stop watching the cursor, there's no trade window left to drop gold into
-        Events:unregister("TradeWindowCursorChanged");
-        self.holdingMoney = false;
+        Events:unregister(CURSOR_CHANGED_LISTENER_ID);
 
         -- We don't want resetState to trigger since TRADE_CLOSED is fired before TRADE_COMPLETED
         return;
@@ -438,6 +482,8 @@ function TradeWindow:handleEvents(event, ...)
 end
 
 --- Keep track of the trade window's state (e.g. which items, how much money etc)
+---
+---@return nil
 function TradeWindow:updateState()
     if (not TradeFrame:IsShown()) then
         self:resetState();
@@ -445,25 +491,21 @@ function TradeWindow:updateState()
     end
 
     -- NPC is currently the player you're trading
-    local partnerName, partnerRealm = UnitName("NPC", true);
+    local partnerName, partnerRealm = UnitName("NPC");
     self.State.partner = GL:formatPlayerName(partnerName, { realm = partnerRealm, includeRealm = "always", });
 
     -- Fetch the player name of whomever we're trading with
     partnerName = strtrim(_G.TradeFrameRecipientNameText:GetText());
 
     -- Retail can add (*) or similar to the trade window's partner name ie "Name (*)". Hence the explode+replace
-    partnerName = GL:explode(partnerName, " ")[1];
-    local sanitizeName = function (name)
-        name = name:gsub("%-", "");
-        name = name:gsub("%*", "");
-        name = name:gsub("%(", "");
-        return name:gsub("%)", "");
-    end;
-    partnerName = partnerName and sanitizeName(partnerName);
+    partnerName = sanitizePartnerName(GL:explode(partnerName, " ")[1]);
 
     -- If the frame doesn't hold the player name that we set earlier then override it
     -- This should never happen and is nothing but a failsafe
-    if (not GL:strStartsWith(self.State.partner, partnerName)) then
+    -- An empty frame is no reason to wipe a perfectly good partner name though
+    if (not GL:empty(partnerName)
+        and not GL:strStartsWith(self.State.partner, partnerName)
+    ) then
         self.State.partner = partnerName;
     end
 
@@ -543,23 +585,17 @@ function TradeWindow:updateState()
 end
 
 --- Reset the trade state object
+---
+---@return nil
 function TradeWindow:resetState()
     self.manuallyChangedAnnounceCheckbox = false;
-
-    self.State = {
-        MyItems = {},
-        myGold = 0,
-        TheirItems = {},
-        theirGold = 0,
-        partner = "",
-        itemLink = nil,
-        itemID = nil,
-    };
+    self.State = newState();
 end
 
 --- Attempt to add a given itemID or itemLink to the trade window
 ---
 ---@param itemLinkOrID number|string
+---@return nil
 function TradeWindow:addItem(itemLinkOrID)
     tinsert(self.ItemsToAdd, itemLinkOrID);
 end
@@ -570,6 +606,8 @@ end
 ---
 ---@param amount number
 ---@param target string
+---@param callback? function Receives false, we can never report success
+---@return nil
 ---@test /script _G.Gargul.TradeWindow:setCopper(20, "Ggtest-Sen'jin");
 function TradeWindow:setCopper(amount, target, callback)
     -- There are two ways to add gold to the trade window:
@@ -582,17 +620,21 @@ function TradeWindow:setCopper(amount, target, callback)
     -- and not something that I consider usuable from a user-perspective.
     --
     -- Guess which single one Blizzard blocked for "security" reasons. 100 points for Fumblepuff
-    if (true) then
-        return;
+    --
+    -- Until that changes we always fail, and callers need to hear about it so they can tell the user
+    if (type(callback) == "function") then
+        callback(false);
     end
 end
 
 --- Process the ItemsToAdd table
+---
+---@return nil
 function TradeWindow:processItemsToAdd()
     -- Make sure we don't use items if the trade window is not opened
     -- The last thing we want to do is equip an item or use a consumable by mistake!
     if (not TradeFrame:IsShown()) then
-        GL:cancelTimer("TradeWindowAddItemsInterval");
+        GL:cancelTimer(ADD_ITEMS_TIMER_ID);
 
         return;
     end
@@ -643,9 +685,9 @@ function TradeWindow:shouldAnnounce()
 
     -- The user manually set the announcement state for the current trade, no need to override it
     if (self.manuallyChangedAnnounceCheckbox
-        and GargulAnnounceTradeDetailsText
+        and self.AnnouncementCheckBox
     ) then
-        return GargulAnnounceTradeDetailsText:GetChecked();
+        return GL:toboolean(self.AnnouncementCheckBox:GetChecked());
     end
 
     if (mode == "ALWAYS") then
@@ -673,6 +715,8 @@ function TradeWindow:shouldAnnounce()
 end
 
 --- Draw/Update the checkbox and settings cogwheel
+---
+---@return nil
 function TradeWindow:updateAnnouncementCheckBox()
     self.AnnouncementCheckBox:SetChecked(self:shouldAnnounce());
 end
