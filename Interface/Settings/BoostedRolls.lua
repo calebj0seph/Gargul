@@ -148,7 +148,7 @@ function BoostedRolls:draw(Parent)
     BoostedRollsReserveThreshold:SetHeight(20);
     BoostedRollsReserveThreshold:SetFullWidth(true);
     BoostedRollsReserveThreshold:SetText(GL.Settings:get("BoostedRolls.reserveThreshold", 0));
-    BoostedRollsReserveThreshold:SetLabel(("|cff%sThe maximum roll, everything above is considered a 'reserve'.|r"):format(
+    BoostedRollsReserveThreshold:SetLabel(("|cff%sThe maximum roll, everything above is considered a 'reserve'. Set to 0 for unlimited.|r"):format(
         GL:classHexColor("rogue")
     ));
     BoostedRollsReserveThreshold:SetCallback("OnTextChanged", function (self)

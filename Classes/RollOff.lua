@@ -105,10 +105,19 @@ function RollOff:announceStart(itemLink, time, note)
         BoostedRolls.identifier = strsub(GL.Settings:get("BoostedRolls.identifier", "BR"), 1, 3);
         BoostedRolls.RangePerPlayer = {};
 
+        -- Softres bonus rolls can only be spent on the items a player reserved
+        local softresItemID = GL.BoostedRolls:importedFromSoftres() and GL:getItemIDFromLink(itemLink) or nil;
+
         for _, Player in pairs(GL.User:groupMembers()) do
             (function ()
                 local normalizedName = GL.BoostedRolls:normalizedName(Player.fqn);
                 if (not GL.BoostedRolls:hasPoints(normalizedName)) then
+                    return;
+                end
+
+                if (softresItemID
+                    and not GL.SoftRes:itemIDIsReservedByPlayer(softresItemID, Player.fqn)
+                ) then
                     return;
                 end
 
@@ -636,7 +645,8 @@ function RollOff:award(roller, itemLink, RollBracket, identicalRollDetected)
 
     local rollIdentifier = RollBracket[1];
     local isBR = rollIdentifier == GL.Settings:get("BoostedRolls.identifier", "BR");
-    local BRCost = isBR and GL.Settings:get("BoostedRolls.defaultCost", 0) or nil;
+    local softresBR = isBR and GL.BoostedRolls:importedFromSoftres();
+    local BRCost = (isBR and not softresBR) and GL.Settings:get("BoostedRolls.defaultCost", 0) or nil;
     local isOS, addPlusOne = GL:toboolean(RollBracket[5]), GL:toboolean(RollBracket[6]);
     local Rolls = type(RollOff.CurrentRollOff.Rolls) == "table" and GL:cloneTable(RollOff.CurrentRollOff.Rolls) or {};
 
@@ -652,6 +662,11 @@ function RollOff:award(roller, itemLink, RollBracket, identicalRollDetected)
         if ((IsShiftKeyDown() and not GL.Settings:get("AwardingLoot.skipAwardConfirmationDialog"))
             or (not IsShiftKeyDown() and GL.Settings:get("AwardingLoot.skipAwardConfirmationDialog"))
         ) then
+            -- A Softres bonus roll consumes whatever's left of the player's reservation bonus, no manual cost involved
+            if (softresBR) then
+                BRCost = GL.BoostedRolls:consumeSoftresBonus(roller, GL:getItemIDFromLink(itemLink));
+            end
+
             -- Add the player we awarded the item to to the item's tooltip
             GL.AwardedLoot:addWinner({
                 winner = roller,
@@ -668,10 +683,16 @@ function RollOff:award(roller, itemLink, RollBracket, identicalRollDetected)
             end
 
             -- Deduct Boosted Roll points if needed
-            BRCost = tonumber(BRCost);
-            if (BRCost and GL:gt(BRCost, 0)) then
-                GL.BoostedRolls:modifyPoints(roller, -BRCost);
-                GL.Interface.BoostedRolls.Overview:refreshTable();
+            if (softresBR) then
+                if (BRCost) then
+                    GL.Interface.BoostedRolls.Overview:refreshTable();
+                end
+            else
+                BRCost = tonumber(BRCost);
+                if (BRCost and GL:gt(BRCost, 0)) then
+                    GL.BoostedRolls:modifyPoints(roller, -BRCost);
+                    GL.Interface.BoostedRolls.Overview:refreshTable();
+                end
             end
 
             if (GL.Settings:get("UI.RollOff.closeOnAward")) then
@@ -703,13 +724,21 @@ function RollOff:award(roller, itemLink, RollBracket, identicalRollDetected)
                     end
                 end
 
-                local BoostedRollCostEditBox = GL.Interface:get(GL.Interface.Dialogs.AwardDialog, "EditBox.Cost");
-                if (BoostedRollCostEditBox) then
-                    BRCost = GL.BoostedRolls:toPoints(BoostedRollCostEditBox:GetText());
+                if (softresBR) then
+                    BRCost = GL.BoostedRolls:consumeSoftresBonus(roller, GL:getItemIDFromLink(itemLink));
 
                     if (BRCost) then
-                        GL.BoostedRolls:modifyPoints(roller, -BRCost);
                         GL.Interface.BoostedRolls.Overview:refreshTable();
+                    end
+                else
+                    local BoostedRollCostEditBox = GL.Interface:get(GL.Interface.Dialogs.AwardDialog, "EditBox.Cost");
+                    if (BoostedRollCostEditBox) then
+                        BRCost = GL.BoostedRolls:toPoints(BoostedRollCostEditBox:GetText());
+
+                        if (BRCost) then
+                            GL.BoostedRolls:modifyPoints(roller, -BRCost);
+                            GL.Interface.BoostedRolls.Overview:refreshTable();
+                        end
                     end
                 end
 
@@ -763,13 +792,21 @@ function RollOff:award(roller, itemLink, RollBracket, identicalRollDetected)
                     end
                 end
 
-                local boostedRollCostEditBox = GL.Interface:get(GL.Interface.Dialogs.AwardDialog, "EditBox.Cost");
-                if (boostedRollCostEditBox) then
-                    BRCost = GL.BoostedRolls:toPoints(boostedRollCostEditBox:GetText());
+                if (softresBR) then
+                    BRCost = GL.BoostedRolls:consumeSoftresBonus(roller, GL:getItemIDFromLink(itemLink));
 
                     if (BRCost) then
-                        GL.BoostedRolls:modifyPoints(roller, -BRCost);
                         GL.Interface.BoostedRolls.Overview:refreshTable();
+                    end
+                else
+                    local boostedRollCostEditBox = GL.Interface:get(GL.Interface.Dialogs.AwardDialog, "EditBox.Cost");
+                    if (boostedRollCostEditBox) then
+                        BRCost = GL.BoostedRolls:toPoints(boostedRollCostEditBox:GetText());
+
+                        if (BRCost) then
+                            GL.BoostedRolls:modifyPoints(roller, -BRCost);
+                            GL.Interface.BoostedRolls.Overview:refreshTable();
+                        end
                     end
                 end
 
@@ -920,6 +957,14 @@ function RollOff:processRoll(message)
     end
 
     tinsert(self.CurrentRollOff.Rolls, Roll);
+
+    -- The roll owner is authoritative: consume a Softres bonus roll on use if it was spent on a reserved item
+    if (self:startedByMe()
+        and GL.BoostedRolls:consumedOnUse()
+        and GL:iEquals(Roll.classification, GL.Settings:get("BoostedRolls.identifier", "BR"))
+    ) then
+        GL.BoostedRolls:consumeSoftresBonus(Roll.player, self.CurrentRollOff.itemID);
+    end
 
     if (GL:iEquals(Roll.player, GL.User.fqn)
         or GL:iEquals(Roll.player, GL.User.name)

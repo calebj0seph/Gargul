@@ -37,6 +37,13 @@ function BoostedRolls:_init()
 
     GL.Events:register("BoostedRollsUserJoinedGroupListener", "GL.USER_JOINED_NEW_GROUP", function () self:requestData(); end);
 
+    -- Bonus rolls imported from Softres are worthless without the soft-reserves they belong to
+    GL.Events:register("BoostedRollsSoftresClearedListener", "GL.SOFTRES_CLEARED", function ()
+        if (self:importedFromSoftres()) then
+            self:clear(false);
+        end
+    end);
+
     -- Make sure BoostedRoll changes are only broadcasted once every 3 seconds
     -- but never wait longer than 10 seconds in total in case updates keep coming in
     GL.Events:register("BoostedRollsUpdateQueuedListener", "GL.BOOSTED_ROLLS_UPDATE_QUEUED", function ()
@@ -175,6 +182,20 @@ function BoostedRolls:available()
     return GL:higherThanZero(DB:get("BoostedRolls.MetaData.importedAt", 0));
 end
 
+--- Check whether the current boosted roll data was imported from a Softres.it string
+---
+---@return boolean
+function BoostedRolls:importedFromSoftres()
+    return DB:get("BoostedRolls.MetaData.source") == GL.Data.Constants.BoostedRollSources.softres;
+end
+
+--- Check whether a bonus roll is consumed the moment it's used, as opposed to only on a win
+---
+---@return boolean
+function BoostedRolls:consumedOnUse()
+    return self:importedFromSoftres() and GL:toboolean(DB:get("BoostedRolls.MetaData.consumedOnUse", false));
+end
+
 --- Determine if a player is present in the table
 ---
 ---@param name string
@@ -222,12 +243,31 @@ function BoostedRolls:toPoints(points)
     return points;
 end
 
+--- Get the reserve threshold, or nil when unlimited (threshold set to 0).
+---
+---@return number|nil
+function BoostedRolls:threshold()
+    local threshold = GL.Settings:get("BoostedRolls.reserveThreshold", 0);
+
+    if (not GL:higherThanZero(threshold)) then
+        return;
+    end
+
+    return threshold;
+end
+
 --- Calculate roll points from points.
 ---
 ---@param points number
 ---@return number
 function BoostedRolls:rollPoints(points)
-    return math.min(GL.Settings:get("BoostedRolls.reserveThreshold", 0), points);
+    local threshold = self:threshold();
+
+    if (not threshold) then
+        return points;
+    end
+
+    return math.min(threshold, points);
 end
 
 --- Calculate reserve from points.
@@ -235,7 +275,13 @@ end
 ---@param points number
 ---@return number
 function BoostedRolls:reserve(points)
-    return math.max(0, points - GL.Settings:get("BoostedRolls.reserveThreshold", 0));
+    local threshold = self:threshold();
+
+    if (not threshold) then
+        return 0;
+    end
+
+    return math.max(0, points - threshold);
 end
 
 --- Calculate max roll from points.
@@ -243,7 +289,13 @@ end
 ---@param points number
 ---@return number
 function BoostedRolls:maxBoostedRoll(points)
-    return math.max(1, math.min(GL.Settings:get("BoostedRolls.reserveThreshold", 0), points));
+    local threshold = self:threshold();
+
+    if (not threshold) then
+        return math.max(1, points);
+    end
+
+    return math.max(1, math.min(threshold, points));
 end
 
 --- Calculate min roll from points.
@@ -256,7 +308,7 @@ function BoostedRolls:minBoostedRoll(points)
 
     -- Fixed will result in player with 140 points rolling /rnd 140-140
     if (system == Systems.FIXED) then
-        return math.max(1, math.min(GL.Settings:get("BoostedRolls.reserveThreshold", 0), points));
+        return self:maxBoostedRoll(points);
     end
 
     -- Increased max will result in player with 140 points rolling /rnd 1-140
@@ -276,10 +328,10 @@ end
 ---@param high number
 ---@return boolean
 function BoostedRolls:isBoostedRoll(low, high)
-    local threshold = GL.Settings:get("BoostedRolls.reserveThreshold", 0);
+    local threshold = self:threshold();
 
     --- Check maximum.
-    if (self:maxBoostedRoll(high) ~= high or high > threshold) then
+    if (self:maxBoostedRoll(high) ~= high or (threshold and high > threshold)) then
         return false;
     end
 
@@ -289,10 +341,54 @@ end
 
 --[[ MUTATIONS ]]
 
---- Clear all boosted roll data
+--- Snapshot the settings we're about to override for a Softres import (unless already snapshotted) and apply Softres-friendly defaults.
+---
+---@return table
+function BoostedRolls:applySoftresSettings()
+    local PreviousSettings = self:importedFromSoftres()
+        and DB:get("BoostedRolls.MetaData.PreviousSettings")
+        or {
+            enabled = GL.Settings:get("BoostedRolls.enabled", false),
+            automaticallyShareData = GL.Settings:get("BoostedRolls.automaticallyShareData", true),
+            reserveThreshold = GL.Settings:get("BoostedRolls.reserveThreshold", 0),
+            defaultPoints = GL.Settings:get("BoostedRolls.defaultPoints", 0),
+        };
+
+    GL.Settings:set("BoostedRolls.enabled", true);
+    GL.Settings:set("BoostedRolls.automaticallyShareData", false);
+    GL.Settings:set("BoostedRolls.reserveThreshold", 0);
+    GL.Settings:set("BoostedRolls.defaultPoints", 100);
+
+    return PreviousSettings;
+end
+
+--- Restore the settings that were overridden by a Softres import.
 ---
 ---@return nil
-function BoostedRolls:clear()
+function BoostedRolls:restorePreviousSettings()
+    local PreviousSettings = DB:get("BoostedRolls.MetaData.PreviousSettings");
+
+    if (type(PreviousSettings) ~= "table") then
+        return;
+    end
+
+    GL.Settings:set("BoostedRolls.enabled", PreviousSettings.enabled);
+    GL.Settings:set("BoostedRolls.automaticallyShareData", PreviousSettings.automaticallyShareData);
+    GL.Settings:set("BoostedRolls.reserveThreshold", PreviousSettings.reserveThreshold);
+    GL.Settings:set("BoostedRolls.defaultPoints", PreviousSettings.defaultPoints);
+end
+
+--- Clear all boosted roll data
+---
+---@param redraw? boolean Defaults to true
+---@return nil
+function BoostedRolls:clear(redraw)
+    redraw = redraw ~= false;
+
+    if (self:importedFromSoftres()) then
+        self:restorePreviousSettings();
+    end
+
     DB.BoostedRolls = {
         Points = {},
         Aliases = {},
@@ -303,7 +399,128 @@ function BoostedRolls:clear()
     };
 
     GL.Interface.BoostedRolls.Overview:close();
-    self:draw();
+
+    if (redraw) then
+        self:draw();
+    end
+end
+
+--- Import bonus rolls exported by Softres.it, converting bonus points into Boosted Roll points (100 base + bonus).
+---
+---@param BonusRolls table Array of { name, bonus } as provided by the Softres.it Gargul export
+---@param PlayerMap table Map of Softres name -> in-game name, as returned by SoftRes:fixPlayerNames
+---@param Options table { softresID string, consumedOnUse boolean, force? boolean }
+---@return boolean
+function BoostedRolls:importFromSoftres(BonusRolls, PlayerMap, Options)
+    Options = Options or {};
+
+    if (GL:empty(BonusRolls)) then
+        return false;
+    end
+
+    PlayerMap = PlayerMap or {};
+    local softresID = tostring(Options.softresID or "");
+    local consumedOnUse = GL:toboolean(Options.consumedOnUse);
+    local force = GL:toboolean(Options.force);
+
+    -- We already imported this exact Softres data, no need (and no want, we might've consumed bonuses since) to redo it
+    if (not force
+        and self:importedFromSoftres()
+        and DB:get("BoostedRolls.MetaData.softresID", "") == softresID
+    ) then
+        return false;
+    end
+
+    local apply = function ()
+        local PreviousSettings = self:applySoftresSettings();
+
+        local Points = {};
+        local Aliases = {};
+
+        for _, Entry in pairs(BonusRolls) do
+            local softresName = strlower(tostring(Entry.name or ""));
+            local bonus = tonumber(Entry.bonus) or 0;
+
+            if (not GL:empty(softresName)) then
+                local mainName = PlayerMap[softresName] or softresName;
+                local mainGUID = self:playerGUID(mainName);
+                local _, mainRealm = GL:stripRealm(mainGUID);
+
+                Points[mainGUID] = 100 + bonus;
+
+                -- The player's name was "fixed", link the original Softres name as an alias
+                if (PlayerMap[softresName]) then
+                    local aliasGUID = self:playerGUID(softresName, mainRealm);
+
+                    if (aliasGUID ~= mainGUID) then
+                        Aliases[aliasGUID] = mainGUID;
+                    end
+                end
+            end
+        end
+
+        if (GL:empty(Points)) then
+            return false;
+        end
+
+        DB.BoostedRolls = {
+            Points = Points,
+            Aliases = Aliases,
+            MetaData = {
+                importedAt = GetServerTime(),
+                updatedAt = GetServerTime(),
+                uuid = GL:uuid(),
+                source = GL.Data.Constants.BoostedRollSources.softres,
+                softresID = softresID,
+                consumedOnUse = consumedOnUse,
+                PreviousSettings = PreviousSettings,
+            },
+        };
+
+        self:materializeData();
+        GL.Events:fire("GL.BOOSTEDROLLS_IMPORTED");
+        GL.Interface.BoostedRolls.Overview:refreshTable();
+
+        return true;
+    end;
+
+    -- There's existing non-Softres data, ask the user before overwriting it
+    if (self:available()
+        and not self:importedFromSoftres()
+    ) then
+        GL.Interface.Dialogs.PopupDialog:open({
+            question = L["Softres.it bonus rolls were found. Do you want to clear your existing boosted roll data and import the new bonus rolls?"],
+            OnYes = apply,
+        });
+
+        return false;
+    end
+
+    return apply();
+end
+
+--- Consume a player's Softres-derived bonus after they use or win a Boosted Roll on an item they reserved.
+---
+---@param playerName string
+---@param itemID number|string
+---@return number|nil The points that were consumed, or nil if nothing was consumed
+function BoostedRolls:consumeSoftresBonus(playerName, itemID)
+    if (not self:importedFromSoftres()
+        or not GL.SoftRes:itemIDIsReservedByPlayer(itemID, playerName)
+    ) then
+        return;
+    end
+
+    local normalizedName = self:normalizedName(playerName);
+
+    if (not self:hasPoints(normalizedName)) then
+        return;
+    end
+
+    local points = self:getPoints(normalizedName);
+    self:deletePoints(normalizedName);
+
+    return points;
 end
 
 --- Set aliases
@@ -626,6 +843,11 @@ function BoostedRolls:import(data, openOverview, MetaData)
         setImporterStatus(L["Invalid data provided. Make sure that the contents follows the required format and no header row is included"]);
 
         return false;
+    end
+
+    -- This data no longer comes from Softres, restore whatever settings we overrode on its behalf
+    if (self:importedFromSoftres()) then
+        self:restorePreviousSettings();
     end
 
     MetaData = MetaData or {};

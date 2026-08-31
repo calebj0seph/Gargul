@@ -263,6 +263,11 @@ GL.Data.Constants = {
         lootReserve = 2,
     },
 
+    BoostedRollSources = {
+        manual = 0,
+        softres = 1,
+    },
+
     GargulConflictsWith = {
         "AutoDestroy",
         "AutoLootAssist",

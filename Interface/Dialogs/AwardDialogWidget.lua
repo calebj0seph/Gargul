@@ -258,7 +258,9 @@ local function constructor()
 
     OptionsFrame:AddChild(OffSpecLabel);
 
-    if (GL.BoostedRolls:enabled()) then
+    if (GL.BoostedRolls:enabled()
+        and not GL.BoostedRolls:importedFromSoftres()
+    ) then
         HorizontalSpacer = AceGUI:Create("SimpleGroup");
         HorizontalSpacer:SetLayout("FILL");
         HorizontalSpacer:SetFullWidth(true);

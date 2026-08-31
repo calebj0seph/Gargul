@@ -25,6 +25,7 @@ local SoftRes = {
     lastTooltipData = nil,
     lastTooltipItemLink = nil,
     lastTooltipTime = nil,
+    PendingBonusRolls = nil, -- Bonus rolls from the last imported Gargul string, consumed by BoostedRolls:importFromSoftres
 
     MaterializedData = {
         ClassByPlayerName = {},
@@ -889,6 +890,9 @@ function SoftRes:import(data, openOverview)
     local reportStatus = openOverview; -- Notify of fixed names and other messages?
     local success = false;
 
+    -- Cleared here so a CSV/Weakaura import (which never sets it) can't reuse stale bonus rolls
+    self.PendingBonusRolls = nil;
+
     -- Make sure all the required properties are available and of the correct type
     if (GL:empty(data)) then
         GL.Interface:get("SoftRes.Importer", "Label.StatusMessage"):SetText(L["Invalid soft-reserve data provided"]);
@@ -924,6 +928,13 @@ function SoftRes:import(data, openOverview)
     end
 
     DB:set("SoftRes.MetaData.playerMap", RewiredNames);
+
+    -- Convert any Softres.it bonus rolls into Boosted Roll points
+    GL.BoostedRolls:importFromSoftres(self.PendingBonusRolls, RewiredNames, {
+        softresID = DB:get("SoftRes.MetaData.id"),
+        consumedOnUse = DB:get("SoftRes.MetaData.bonusRollsConsumedOnUse", false),
+        force = openOverview,
+    });
 
     -- Reset the materialized data
     self.MaterializedData = {
@@ -1110,8 +1121,10 @@ function SoftRes:importGargulData(data)
     local id = tostring(data.metadata.id) or "";
     local url = data.metadata.url;
     local raidStartsAt = data.metadata.raidStartsAt or 0;
+    local bonusRollsConsumedOnUse = GL:toboolean(data.metadata.bonusrolls_consumed_on_use or false);
 
     DB.SoftRes.MetaData = {
+        bonusRollsConsumedOnUse = bonusRollsConsumedOnUse,
         createdAt = createdAt,
         discordUrl = discordUrl,
         hidden = hidden,
@@ -1120,8 +1133,11 @@ function SoftRes:importGargulData(data)
         importString = importString,
         raidStartsAt = raidStartsAt,
         updatedAt = updatedAt,
-        url = url or ( "https://legacy.softres.it/raid/" .. id ),
+        url = url or ( "https://softres.it/raid/" .. id ),
     };
+
+    -- Consumed by SoftRes:import (after fixPlayerNames), converted into Boosted Roll points
+    self.PendingBonusRolls = data.bonusrolls;
 
     local differentPlusOnes = false;
     local PlusOnes = {};
