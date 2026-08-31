@@ -83,7 +83,7 @@ L["You automatically needed on %s"] = "Has tirado Need automáticamente en %s";
 L["You automatically greeded on %s"] = "Has tirado Greed automáticamente en %s";
 L["Automatically roll need, greed or pass based on your saved rules when a Gargul roll is announced. Does not work with group loot rolls. Manage rules via the Auto Roll Rules section or |c00A79EFF/gl autoroll|r"] = "Rueda automáticamente según tus reglas cuando se anuncia un roll de Gargul. No funciona con rolls de botín de grupo. Gestiona en Auto Roll Rules o |c00A79EFF/gl autoroll|r";
 L["now supports auto rolling: |c00%s/gl ar|r or |c00%s/gl autoroll|r"] = "Gargul ahora soporta auto rolling: |c00%s/gl ar|r o |c00%s/gl autoroll|r";
-L["Boosted Rolls"] = "Rollos potenciados";
+L["Boosted Rolls"] = "Tiradas potenciadas";
 L["BR"] = "BR";
 L["\nAdd how many points for everyone currently in the raid?\n\n|c00BE3333Use the 'Add missing raiders' button first if you want everyone to get points, even those without a boosted roll entry!"] = [[
 ¿Suma cuántos puntos para todos los que están actualmente en la incursión?
@@ -115,15 +115,14 @@ L["Rename profile"] = "Renombrar perfil";
 L["Are you sure you want to clear your existing boosted roll data and import new data broadcasted by %s?"] = "¿Estás seguro de que deseas borrar los datos de tus tiradas mejoradas existentes e importar nuevos datos transmitidos por %s?";
 L["Invalid data provided. Make sure that the contents follows the required format and no header row is included"] = "Se proporcionaron datos no válidos. Asegúrese de que el contenido siga el formato requerido y no se incluya ninguna fila de encabezado";
 L["\nHere you can import boosted roll data and aliases from a table in CSV or TSV format or pasted from a Google Docs Sheet.\n\nThe table needs at least two columns: The player name followed by the amount of points. Additional columns are optional and may contain aliases for the player.\nHere is an example line:\n\nFoobar,240,Barfoo"] = [[
-Aquí puede importar datos y alias de rollos mejorados desde una tabla en formato CSV o TSV o pegarlos desde una hoja de Google Docs.
+Aquí puede importar datos y alias de tiradas mejoradas desde una tabla en formato CSV o TSV o pegarlos desde una hoja de Google Docs.
 
 La tabla necesita al menos dos columnas: el nombre del jugador seguido de la cantidad de puntos. Las columnas adicionales son opcionales y pueden contener alias del reproductor.
 Aquí hay una línea de ejemplo:
 
 Foobar,240,Barfoo]];
 L["Points"] = "Puntos";
-L["Points: %s"] = "Puntos: %s";
-L["N/A"] = "N/D";
+L["%s Roll: %s-%s"] = "%s Tirada: %s-%s";
 L["Reserve"] = "Reservar";
 L["\nAre you sure you want to update your existing boosted rolls with data from %s?\n\nYour latest update was on |c00A79EFF%s, theirs on |c00A79EFF%s."] = [[
 ¿Estás seguro de que deseas actualizar tus tiradas mejoradas existentes con datos de %s?
@@ -924,7 +923,7 @@ L["Are you sure you want to reset all of Gargul's window sizes, positions and sc
 L["Restore"] = "Restaurar";
 L["Resume"] = "Reanudar";
 L[">"] = ">";
-L["Roll"] = "Rollo";
+L["Roll"] = "Tirada";
 L["Award %s to %s?"] = "¿Otorgar %s a %s?";
 L["Close on award"] = "Cerrar la adjudicación";
 L["Close on start"] = "Cerrar al inicio";
@@ -943,9 +942,9 @@ L["(OS)"] = "(SO)";
 L["NOTE"] = "NOTA";
 L["Can't stop roll off, no roll off in progress"] = "No se puede detener la transferencia, no hay ninguna transferencia en curso";
 L["Pass"] = "Aprobar";
-L["rolls: %s"] = "rollos: %s";
+L["rolls: %s"] = "tiradas: %s";
 L["Open master looter window"] = "Abrir ventana de saqueador maestro";
-L["Roll accepted!"] = "Rollo aceptado!";
+L["Roll accepted!"] = "¡Tirada aceptada!";
 L["A roll is currently in progress"] = "Actualmente hay una tirada en curso.";
 L["Prio [%s]"] = "Prioridad [%s]";
 L["SR [%sx]"] = "SR [%sx]";

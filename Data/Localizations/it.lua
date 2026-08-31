@@ -129,8 +129,7 @@ Ecco una riga di esempio:
 
 Foobar,240,Barfoo]];
 L["Points"] = "Punti";
-L["Points: %s"] = "Punti: %s";
-L["N/A"] = "N/D";
+L["%s Roll: %s-%s"] = "%s Tiro: %s-%s";
 L["Reserve"] = "Riserva";
 L["\nAre you sure you want to update your existing boosted rolls with data from %s?\n\nYour latest update was on |c00A79EFF%s, theirs on |c00A79EFF%s."] = [[
 Sei sicuro di voler aggiornare i tuoi elenchi potenziati esistenti con i dati di %s?
@@ -925,7 +924,7 @@ L["Are you sure you want to reset all of Gargul's window sizes, positions and sc
 L["Restore"] = "Ristabilire";
 L["Resume"] = "Riprendere";
 L[">"] = ">";
-L["Roll"] = "Rotolo";
+L["Roll"] = "Tiro";
 L["Award %s to %s?"] = "Premio da %s a %s?";
 L["Close on award"] = "Vicino al premio";
 L["Close on start"] = "Chiudi all'avvio";
@@ -943,10 +942,10 @@ L["(OS)"] = "(sistema operativo)";
 L["NOTE"] = "NOTA";
 L["Can't stop roll off, no roll off in progress"] = "Impossibile fermare il roll-off, nessun roll-off in corso";
 L["Pass"] = "Passaggio";
-L["rolls: %s"] = "rotoli: %s";
+L["rolls: %s"] = "tiri: %s";
 L["Open master looter window"] = "Apri la finestra principale del saccheggiatore";
-L["Roll accepted!"] = "Rotolo accettato!";
-L["A roll is currently in progress"] = "Attualmente è in corso un appello";
+L["Roll accepted!"] = "Tiro accettato!";
+L["A roll is currently in progress"] = "Attualmente è in corso un tiro";
 L["Prio [%s]"] = "Prezzo [%s]";
 L["SR [%sx]"] = "RS [%sx]";
 L["Wish [%s]"] = "Desiderio [%s]";

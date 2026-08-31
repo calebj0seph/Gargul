@@ -151,16 +151,8 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
                     existingOnEnter(Button);
                 end
 
-                local tooltipText;
-                if (GL.BoostedRolls:hasPoints(GL.User.fqn)) then
-                    local points = GL.BoostedRolls:getPoints(GL.User.fqn);
-                    tooltipText = (L["Points: %s"]):format(tostring(points));
-                else
-                    tooltipText = (L["Points: %s"]):format(L["N/A"]);
-                end
-
                 GameTooltip:SetOwner(Button, "ANCHOR_TOP");
-                GameTooltip:SetText(tooltipText);
+                GameTooltip:SetText((L["%s Roll: %s-%s"]):format(identifier, min, max));
                 GameTooltip:Show();
             end);
             Button:SetScript("OnLeave", function ()
